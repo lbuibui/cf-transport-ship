@@ -80,9 +80,14 @@ jobs:
 
   publish:
     name: 发布到 GitHub Release
-    needs: dist
+    needs: [verify, dist]
     runs-on: ubuntu-24.04
     steps:
+      - name: 确认版本号已从 verify 传出
+        run: |
+          v="${{ needs.verify.outputs.version }}"
+          test -n "$v" || { echo "verify 未传出版本号，中止发布"; exit 1; }
+          echo "准备发布 v$v"
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
