@@ -31,5 +31,10 @@
   "license": "MIT",
   "engines": {
     "node": ">=20"
+  },
+  "allowScripts": {
+    "electron": true,
+    "esbuild": true,
+    "electron-winstaller": true
   }
 }
