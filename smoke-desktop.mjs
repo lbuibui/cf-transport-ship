@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const shots = path.join(here, '.tmp', 'smoke');
+fs.mkdirSync(shots, { recursive: true });
 if (!fs.existsSync(path.join(here, 'dist', 'index.html'))) {
   console.error('缺少 dist/index.html，请先运行 npm run build');
   process.exit(1);
@@ -54,10 +56,10 @@ try {
   check('主进程 IPC 可用', state.displays > 0, `v${state.version} electron=${state.electron} 显示器 ${state.displays}`);
 
   // 菜单与改键面板截图，供人工核对
-  await page.screenshot({ path: path.join(here, 'dist', 'desktop-menu.png') });
+  await page.screenshot({ path: path.join(shots, 'desktop-menu.png') });
   await page.click('#btnKeys');
   await page.waitForSelector('#keys:not(.hidden)', { timeout: 5000 });
-  await page.screenshot({ path: path.join(here, 'dist', 'desktop-keys.png') });
+  await page.screenshot({ path: path.join(shots, 'desktop-keys.png') });
   const rows = await page.evaluate(() => document.querySelectorAll('#keyList .krow').length);
   check('改键面板可用', rows === 11, `${rows} 行`);
   await page.click('#btnKeysDone');
@@ -106,7 +108,7 @@ try {
   });
   check('渲染循环运行', typeof fps === 'number' && fps > 0, `${fps} FPS`);
 
-  await page.screenshot({ path: path.join(here, 'dist', 'desktop-smoke.png') });
+  await page.screenshot({ path: path.join(shots, 'desktop-match.png') });
 } catch (e) {
   check('冒烟流程未抛异常', false, e.message);
 } finally {

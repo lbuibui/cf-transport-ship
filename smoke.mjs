@@ -8,6 +8,7 @@ import fs from 'node:fs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, 'dist', 'index.html');
+const shots = path.join(here, '.tmp', 'smoke');
 if (!fs.existsSync(dist)) {
   console.error(`缺少 ${dist}，请先运行 npm run build`);
   process.exit(1);
@@ -41,10 +42,12 @@ const info = await page.evaluate(() => {
   const gl = c && (c.getContext('webgl2') || c.getContext('webgl'));
   return { canvas: !!c, gl: gl ? gl.getParameter(gl.VERSION) : null };
 });
-await page.screenshot({ path: path.join(here, 'dist', 'smoke.png') });
+fs.mkdirSync(shots, { recursive: true });
+await page.screenshot({ path: path.join(shots, 'browser.png') });
 await browser.close();
 
 console.log(`canvas=${info.canvas} gl=${info.gl} errors=${errors.length}`);
+console.log(`截图 ${path.relative(here, path.join(shots, 'browser.png'))}`);
 for (const e of errors.slice(0, 6)) console.log(`  ${e}`);
 const ok = info.canvas && !!info.gl && errors.length === 0;
 console.log(ok ? 'smoke OK' : 'smoke FAILED');
