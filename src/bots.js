@@ -17,6 +17,15 @@ export const BOT_NAMES = [
 
 // 各阵营的架点（潜伏者坐标，保卫者取反）
 const HOLDS = [[-20.5, -7.2, 0.2], [-24.6, 5.8, -0.15], [-16.4, 1.3, 0.1], [-9.8, -6.8, 0.25], [-26.2, -6.5, 0.05]];
+// 管道二楼架点：z≈10.4，面朝甲板
+const ROOF_HOLDS = [[-26, 10.4, 0], [-18, 10.4, 0], [-10, 10.4, 0], [-2, 10.4, 0], [3.5, 10.4, 0.12]];
+// 箱顶与集装箱顶架点：必须沿木箱逐级跳上去
+const HIGH_HOLDS = [
+  [-14.65, 2.3, 1.8],   // B1 侧面木箱
+  [-13.0, 2.5, 2.59],   // B1 集装箱顶
+  [11.3, 7.5, 1.6],     // 管道出口木箱
+  [10.0, 8.85, 0.9],    // 出口低箱
+];
 const LANES = [-6.8, -0.4, 6.8];
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
@@ -27,7 +36,7 @@ export class Bot extends Actor {
     super(game, o);
     this.diff = DIFF[o.diff] || DIFF.normal;
     this.recoilControl = this.diff.ctrl;
-    this.path = null; this.pi = 0; this.goal = null;
+    this.path = null; this.pi = 0; this.goal = null; this.goalHeight = 0;
     this.target = null; this.visible = false; this.lastSeen = null; this.lastSeenT = -99; this.reactUntil = 0;
     this.errY = 0; this.errP = 0; this.aimHead = false;
     this.strafeDir = 1; this.strafeT = 0; this.burst = 0; this.burstPauseUntil = 0;
@@ -36,10 +45,13 @@ export class Bot extends Actor {
     this.heard = null; this.heardT = -99;
     this.fireHeld = false;
     this.wantJump = false;
+    this.jumpTry = 0;
     this.side = this.team === 'BL' ? 1 : -1; // 潜伏者坐标系转换
   }
   onSpawn() {
-    this.path = null; this.goal = null; this.target = null; this.visible = false; this.lastSeen = null;
+    this.path = null; this.goal = null; this.goalHeight = 0; this.goalLayer = 'ground';
+    this.mantle = null; this.jumpTry = 0;
+    this.target = null; this.visible = false; this.lastSeen = null;
     const r = Math.random();
     this.role = this.primary === 'awm' ? 'hold' : r < 0.25 ? 'flank' : 'rush';
     this.lane = LANES[(Math.random() * 3) | 0];
@@ -47,24 +59,94 @@ export class Bot extends Actor {
     this.pickGoal();
   }
   L(x, z) { return [x * this.side, z * this.side]; } // 己方坐标 -> 世界
+  heightAt(x, z) {
+    const s = this.game.world.support(x, z, 0.3, 5.4);
+    return s ? s.y : 0;
+  }
+  // 起点高度用脚底，终点高度用目标层的实际地面高度
+  pathTo(gx, gz, gy = 0) {
+    return this.game.nav.findPath(this.pos.x, this.pos.z, gx, gz, this.pos.y, gy);
+  }
+  // 跳上箱子：用短促的抛物线位移，避免在箱壁前起跳失败
+  startMantle(gx, gz, gh) {
+    const d = Math.hypot(gx - this.pos.x, gz - this.pos.z);
+    this.mantle = {
+      t: 0, dur: Math.min(0.6, 0.18 + d * 0.12),
+      sx: this.pos.x, sy: this.pos.y, sz: this.pos.z,
+      tx: gx, ty: gh, tz: gz,
+    };
+    this.vel.set(0, 0, 0);
+    this.speed = 0;
+    this.onGround = false;
+    this.yaw = Math.atan2(-(gx - this.pos.x), -(gz - this.pos.z));
+    this.game.onJump(this);
+  }
+  updateMantle(dt) {
+    const m = this.mantle;
+    m.t += dt;
+    const k = Math.min(1, m.t / m.dur), e = k * k * (3 - 2 * k);
+    this.pos.x = m.sx + (m.tx - m.sx) * e;
+    this.pos.z = m.sz + (m.tz - m.sz) * e;
+    this.pos.y = m.sy + (m.ty - m.sy) * e + Math.sin(k * Math.PI) * 0.3;
+    this.speed = 0;
+    if (k >= 1) {
+      this.pos.set(m.tx, m.ty, m.tz);
+      this.onGround = true;
+      this.mantle = null;
+      this.jumpTry = this.game.time + 0.4;
+    }
+  }
+  roofRandom(rnd = Math.random) {
+    const [ax, az] = this.L(-26, 9.7), [bx, bz] = this.L(6, 11.4);
+    return this.game.nav.randomFree(rnd, Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz), 2.59);
+  }
   pickGoal() {
     const g = this.game, nav = g.nav, rnd = Math.random;
-    let gx, gz;
+    let gx = null, gz = null, gy = 0;
+    const elevated = this.primary === 'awm' ? 0.85 : this.role === 'hold' ? 0.45 : 0.16;
     if (this.role === 'hold') {
-      const h = HOLDS[(rnd() * HOLDS.length) | 0];
-      [gx, gz] = this.L(h[0], h[1]);
-      this.holdYaw = this.side > 0 ? -Math.PI / 2 + h[2] : Math.PI / 2 + h[2];
+      const r = rnd();
+      if (r < elevated) {
+        const h = ROOF_HOLDS[(rnd() * ROOF_HOLDS.length) | 0];
+        [gx, gz] = this.L(h[0], h[1]);
+        this.holdYaw = this.side > 0 ? h[2] : Math.PI + h[2];
+        gy = 2.59;
+      } else if (r < elevated + 0.15) {
+        const h = HIGH_HOLDS[(rnd() * HIGH_HOLDS.length) | 0];
+        [gx, gz] = this.L(h[0], h[1]);
+        this.holdYaw = Math.atan2(gx, gz);
+        gy = h[2];
+      } else {
+        const h = HOLDS[(rnd() * HOLDS.length) | 0];
+        [gx, gz] = this.L(h[0], h[1]);
+        this.holdYaw = this.side > 0 ? -Math.PI / 2 + h[2] : Math.PI / 2 + h[2];
+      }
     } else if (this.role === 'flank' && this.stage < 3) {
       const pts = [[-31.5, 10.5], [-8, 10.6], [8.0, 7.8]];
       [gx, gz] = this.L(...pts[this.stage]);
     } else if (this.stage < 1) {
       [gx, gz] = this.L(4 + rnd() * 18, this.lane + (rnd() - 0.5) * 2);
-    } else {
-      const p = nav.randomFree(rnd, -26, -8.8, 26, 8.8);
-      [gx, gz] = p || this.L(10, 0);
+    } else if (rnd() < elevated) {
+      const p = this.roofRandom(rnd);
+      if (p) { [gx, gz] = p; gy = 2.59; }
+    } else if (rnd() < 0.14) {
+      const h = HIGH_HOLDS[(rnd() * HIGH_HOLDS.length) | 0];
+      [gx, gz] = this.L(h[0], h[1]);
+      gy = h[2];
     }
-    this.goal = [gx, gz];
-    this.path = nav.findPath(this.pos.x, this.pos.z, gx, gz);
+    if (gx === null) {
+      const p = nav.randomFree(rnd, -26, -8.8, 26, 8.8, 0);
+      [gx, gz] = p ? [p[0], p[1]] : this.L(10, 0);
+    }
+    this.goal = [gx, gz]; this.goalHeight = gy;
+    this.goalLayer = gy > 2.3 ? 'roof' : gy > 0.5 ? 'high' : 'ground';
+    this.path = this.pathTo(gx, gz, gy);
+    if (!this.path) {
+      const p = nav.randomFree(rnd, -26, -8.8, 26, 8.8, 0);
+      this.goal = p ? [p[0], p[1]] : this.L(10, 0);
+      this.goalHeight = 0; this.goalLayer = 'ground';
+      this.path = this.pathTo(this.goal[0], this.goal[1], 0);
+    }
     this.pi = 1;
   }
   hear(pos, loud) {
@@ -129,10 +211,13 @@ export class Bot extends Actor {
     if (!this.visible) {
       if (this.lastSeen && now - this.lastSeenT < 5 && this.role !== 'hold') {
         if (!this.path || this.huntFor !== this.lastSeenT) {
-          this.path = g.nav.findPath(this.pos.x, this.pos.z, this.lastSeen.x, this.lastSeen.z); this.pi = 1; this.huntFor = this.lastSeenT;
+          const p = this.pathTo(this.lastSeen.x, this.lastSeen.z, this.lastSeen.y);
+          if (p) { this.path = p; this.pi = 1; }
+          this.huntFor = this.lastSeenT;
         }
       } else if (this.heard && now - this.heardT < 3 && this.role !== 'hold' && Math.random() < 0.5) {
-        this.path = g.nav.findPath(this.pos.x, this.pos.z, this.heard.x, this.heard.z); this.pi = 1;
+        const p = this.pathTo(this.heard.x, this.heard.z, this.heightAt(this.heard.x, this.heard.z));
+        if (p) { this.path = p; this.pi = 1; }
         this.lookYaw = Math.atan2(-(this.heard.x - this.pos.x), -(this.heard.z - this.pos.z));
         this.heard = null;
       } else if (!this.path || this.pi >= this.path.length) {
@@ -161,7 +246,7 @@ export class Bot extends Actor {
     if (this.stuckT > 1.0) {
       const moved = this.lastCheck.distanceTo(this.pos);
       if (this.path && this.pi < this.path.length && moved < 0.35 && !this.visible) {
-        this.stuckN++; this.wantJump = true;
+        this.stuckN++; if (this.pos.y < 1.5) this.wantJump = true;
         if (this.stuckN > 2) { this.stuckN = 0; this.stage++; this.pickGoal(); }
       } else this.stuckN = 0;
       this.lastCheck.copy(this.pos); this.stuckT = 0;
@@ -169,7 +254,8 @@ export class Bot extends Actor {
   }
   update(dt) {
     const g = this.game, now = g.time;
-    if (!this.alive) return;
+    if (!this.alive) { this.mantle = null; return; }
+    if (this.mantle) { this.updateMantle(dt); return; }
     this.thinkT -= dt;
     if (this.thinkT <= 0) { this.thinkT = 0.13 + Math.random() * 0.06; this.think(); }
     const D = this.diff;
@@ -223,14 +309,21 @@ export class Bot extends Actor {
       const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
       wishX = rx * this.strafeDir * moveK; wishZ = rz * this.strafeDir * moveK;
       if (hd > 22 && d.type !== 'sniper' && this.role !== 'hold') { wishX += -Math.sin(this.yaw) * 0.5; wishZ += -Math.cos(this.yaw) * 0.5; }
-      if (Math.random() < D.bunny * dt && this.onGround && d.type !== 'sniper') this.wantJump = true;
+      if (this.pos.y < 1.5 && Math.random() < D.bunny * dt && this.onGround && d.type !== 'sniper') this.wantJump = true;
     } else {
       if (this.scoped && !this.visible && now - this.lastSeenT > 2) alt = true; // 收镜
       // 沿路径行走
       if (this.path && this.pi < this.path.length) {
         const wp = this.path[this.pi];
         const dx = wp[0] - this.pos.x, dz = wp[1] - this.pos.z, dd = Math.hypot(dx, dz);
-        if (dd < 0.55) this.pi++;
+        const rise = (wp[2] ?? this.pos.y) - this.pos.y;
+        // 跳上箱子：进入起跳距离后走抛物线位移
+        const trigger = rise > 1.0 ? 2.8 : rise > 0.6 ? 1.6 : 1.1;
+        if (wp[3] && this.onGround && now >= this.jumpTry && dd < trigger) {
+          this.startMantle(wp[0], wp[1], wp[2] ?? this.pos.y);
+        }
+        const reached = dd < 0.55 && (!wp[3] || this.pos.y > (wp[2] ?? this.pos.y) - 0.25);
+        if (reached) this.pi++;
         else { wishX = dx / dd; wishZ = dz / dd; }
         if (this.lookYaw === undefined || now - this.heardT > 1.5) dYaw = Math.atan2(-dx, -dz);
         dPitch = 0;
@@ -246,6 +339,22 @@ export class Bot extends Actor {
       if (a === this || !a.alive) continue;
       const dx = this.pos.x - a.pos.x, dz = this.pos.z - a.pos.z, d2 = dx * dx + dz * dz;
       if (d2 < 1.2 && d2 > 1e-4) { const d = Math.sqrt(d2); wishX += dx / d * 0.6; wishZ += dz / d * 0.6; }
+    }
+    // 高处边缘保护：走位不能把自己带下箱子或二楼；主动跳/落不受限制
+    const wpNext = this.path && this.pi < this.path.length ? this.path[this.pi] : null;
+    const dropAhead = !!wpNext && wpNext[2] < this.pos.y - 0.5;
+    const hopAhead = !!wpNext && wpNext[3];
+    if (!dropAhead && !hopAhead && this.onGround && this.pos.y > 0.7 && (wishX || wishZ)) {
+      const r = this.radius * 0.8, probe = 0.7;
+      const safe = (dx, dz) => {
+        const s = g.world.support(this.pos.x + dx * probe, this.pos.z + dz * probe, r, this.pos.y + 0.35);
+        return !!s && s.y > this.pos.y - 0.5;
+      };
+      if (!safe(wishX, wishZ)) {
+        if (safe(wishX, 0)) wishZ = 0;
+        else if (safe(0, wishZ)) wishX = 0;
+        else { wishX = 0; wishZ = 0; }
+      }
     }
     // 转向（限速）
     const turn = D.turn * dt * (this.visible ? 1 : 0.7);

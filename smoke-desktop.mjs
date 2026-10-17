@@ -110,6 +110,44 @@ try {
   const sim = await page.evaluate(() => window.__game.fastForward(6));
   check('对局模拟正常', typeof sim.time === 'string' && sim.kills.length > 0, sim.kills);
 
+  // 多层寻路：二楼与箱顶两条路径；冻结 AI 决策，只验证寻路与跳跃
+  const navChecks = await page.evaluate(() => {
+    const g = window.__game;
+    g.goal = 100; g.timeLeft = 600;
+    const pick = () => g.actors.find((a) => !a.isPlayer && a.alive && a.pos.y < 0.5 && !a.__used) || null;
+    const run = (bot, target) => {
+      bot.think = () => {}; // 不让 AI 改目标
+      bot.goal = [target.x, target.z]; bot.goalHeight = target.y;
+      bot.goalLayer = target.y > 2.3 ? 'roof' : target.y > 0.5 ? 'high' : 'ground';
+      bot.path = g.nav.findPath(bot.pos.x, bot.pos.z, target.x, target.z, bot.pos.y, target.y);
+      bot.pi = 1;
+      let reached = false, fell = false;
+      for (let i = 0; i < 15; i++) {
+        bot.protectT = 999; bot.hp = 100;
+        g.fastForward(2);
+        if (bot.pos.y > target.y - 0.5) reached = true;
+        else if (reached) fell = true;
+      }
+      return { ok: reached && !fell, y: +bot.pos.y.toFixed(2), reached, fell };
+    };
+    const roofBot = pick();
+    if (!roofBot) return { roof: { ok: false, reason: '无地面机器人' } };
+    roofBot.__used = true;
+    roofBot.primary = 'awm'; roofBot.role = 'hold'; roofBot.onSpawn();
+    for (let i = 0; i < 40 && roofBot.goalLayer !== 'roof'; i++) roofBot.pickGoal();
+    const r = roofBot.goalLayer === 'roof'
+      ? run(roofBot, { x: roofBot.goal[0], z: roofBot.goal[1], y: 2.59 })
+      : { ok: false, reason: '未选到二楼目标' };
+    const crateBot = pick();
+    if (!crateBot) return { roof: r, crate: { ok: false, reason: '无地面机器人' } };
+    crateBot.__used = true;
+    const side = crateBot.team === 'BL' ? 1 : -1;
+    const c = run(crateBot, { x: -14.65 * side, z: 2.3 * side, y: 1.8 });
+    return { roof: r, crate: c };
+  });
+  check('二楼寻路可用', navChecks.roof.ok, navChecks.roof.reason || `y=${navChecks.roof.y}`);
+  check('箱顶跳跃可用', navChecks.crate.ok, navChecks.crate.reason || `y=${navChecks.crate.y}`);
+
   const fps = await page.evaluate(async () => {
     await new Promise((r) => setTimeout(r, 1500));
     return window.__game.fps;

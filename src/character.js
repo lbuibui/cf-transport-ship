@@ -211,7 +211,8 @@ export class Soldier {
     });
     void bp;
     this.mesh.updateMatrixWorld(true);
-    this.mesh.bind(new THREE.Skeleton(this.bones));
+    this.skeleton = new THREE.Skeleton(this.bones);
+    this.mesh.bind(this.skeleton);
     this.root.add(this.mesh);
     this.B = Object.fromEntries(this.bones.map((b) => [b.name, b]));
     this.phase = Math.random() * 10;
@@ -223,6 +224,14 @@ export class Soldier {
     this.invFrame = -1;
     this.opacity = 1;
     this.flashT = 0;
+  }
+  // 释放每名士兵独占的 GPU 资源。
+  // 几何体按阵营缓存，枪械模型按武器缓存，二者由模块级缓存复用，不能在这里 dispose。
+  dispose() {
+    this.skeleton.dispose();
+    this.material.dispose();
+    this.gun = null;
+    this.root.clear();
   }
   setWeapon(id) {
     if (this.gunId === id) return;

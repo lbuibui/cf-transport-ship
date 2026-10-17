@@ -35,7 +35,6 @@ export class World {
     this.colliders = [];
     this.grid = new Map();
     this.stamp = 1;
-    this._cand = [];
   }
   add(o) {
     const c = o instanceof Collider ? o : new Collider(o);
@@ -55,8 +54,10 @@ export class World {
       }
     }
   }
+  // 返回本次查询独占的数组。调用方可以在遍历结果时再次查询，
+  // 不会再像共享缓冲区那样被内层 query 清空。
   query(minX, minZ, maxX, maxZ) {
-    const out = this._cand; out.length = 0;
+    const out = [];
     const st = ++this.stamp;
     const x0 = Math.floor(minX / CELL), x1 = Math.floor(maxX / CELL);
     const z0 = Math.floor(minZ / CELL), z1 = Math.floor(maxZ / CELL);
@@ -261,79 +262,178 @@ export class World {
   }
 }
 
-// ============== 寻路网格（地面层） ==============
-export class NavGrid {
+// ============== 多层表面图 + 跳跃链接 ==============
+// 节点 = 格子中心 + 可站立高度。相邻格之间按高差连边：
+//   0.45m 以内走上去，1.68m 以内跳上去，3.4m 以内可以落下。
+const STEP_UP = 0.45;
+const JUMP_UP = 1.68;
+const DROP_DOWN = 3.4;
+
+export class SurfaceNav {
   constructor(world, x0, z0, x1, z1, cell, agentR) {
-    this.x0 = x0; this.z0 = z0; this.cell = cell;
+    this.world = world;
+    this.x0 = x0; this.z0 = z0; this.cell = cell; this.agentR = agentR;
     this.w = Math.ceil((x1 - x0) / cell); this.h = Math.ceil((z1 - z0) / cell);
-    this.block = new Uint8Array(this.w * this.h);
-    this.cost = new Float32Array(this.w * this.h);
+    const n = this.w * this.h;
+    this.cellNodes = new Array(n);
+    for (let i = 0; i < n; i++) this.cellNodes[i] = [];
+    this.nodeCell = []; this.nodeX = []; this.nodeZ = []; this.nodeH = [];
+
+    // 每格候选高度：甲板 0 + 覆盖该格的可站立碰撞体顶面
+    const cand = new Array(n);
+    for (let i = 0; i < n; i++) cand[i] = [0];
     const o = {};
-    for (let j = 0; j < this.h; j++) for (let i = 0; i < this.w; i++) {
-      const cx = x0 + (i + 0.5) * cell, cz = z0 + (j + 0.5) * cell;
-      const cands = world.query(cx - agentR - 0.3, cz - agentR - 0.3, cx + agentR + 0.3, cz + agentR + 0.3);
-      let b = 0, near = 0;
-      for (const c of cands) {
-        if (!c.solid) continue;
-        if (c.bottom > 1.7 || c.top < 0.36) continue;
-        if (World.circleOBB(c, cx, cz, agentR, o)) { b = 1; break; }
-        if (World.circleOBB(c, cx, cz, agentR + 0.45, o)) near = 1;
+    for (const c of world.colliders) {
+      if (!c.solid || c.top < 0.3 || c.top > 5.3) continue;
+      if (Math.min(c.hx, c.hz) * 2 < 0.4) continue;
+      const i0 = Math.floor((c.minX - x0) / cell), i1 = Math.floor((c.maxX - x0) / cell);
+      const j0 = Math.floor((c.minZ - z0) / cell), j1 = Math.floor((c.maxZ - z0) / cell);
+      for (let j = Math.max(0, j0); j <= Math.min(this.h - 1, j1); j++) {
+        for (let i = Math.max(0, i0); i <= Math.min(this.w - 1, i1); i++) {
+          const cx = x0 + (i + 0.5) * cell, cz = z0 + (j + 0.5) * cell;
+          if (!World.circleOBB(c, cx, cz, agentR, o)) continue;
+          const arr = cand[j * this.w + i];
+          let dup = false;
+          for (const h of arr) if (Math.abs(h - c.top) < 0.06) { dup = true; break; }
+          if (!dup) arr.push(c.top);
+        }
       }
-      this.block[j * this.w + i] = b;
-      this.cost[j * this.w + i] = near ? 1.6 : 1;
     }
-    // 屋顶检查：头顶过低（< 2m）的格子也不可走
+
+    // 过滤：必须有真实支撑面、不能被墙体穿过、脚下不能是栏杆
     for (let j = 0; j < this.h; j++) for (let i = 0; i < this.w; i++) {
-      if (this.block[j * this.w + i]) continue;
-      const cx = x0 + (i + 0.5) * cell, cz = z0 + (j + 0.5) * cell;
-      if (world.blocked(cx, 0.4, cz, agentR * 0.8, 1.4)) this.block[j * this.w + i] = 1;
+      const ci = j * this.w + i, cx = x0 + (i + 0.5) * cell, cz = z0 + (j + 0.5) * cell;
+      for (const h of cand[ci]) {
+        const sup = world.support(cx, cz, agentR * 0.95, h + 0.05);
+        if (!sup || Math.abs(sup.y - h) > 0.1) continue;
+        if (Math.min(sup.collider.hx, sup.collider.hz) * 2 < 0.36) continue;
+        if (!this.clear(cx, h, cz)) continue;
+        const id = this.nodeH.length;
+        this.nodeCell.push(ci); this.nodeX.push(cx); this.nodeZ.push(cz); this.nodeH.push(h);
+        this.cellNodes[ci].push(id);
+      }
     }
-    this.open = new Int32Array(this.w * this.h);
-    this.g = new Float32Array(this.w * this.h);
-    this.f = new Float32Array(this.w * this.h);
-    this.parent = new Int32Array(this.w * this.h);
-    this.seen = new Uint32Array(this.w * this.h);
-    this.closed = new Uint32Array(this.w * this.h);
+
+    const N = this.nodeH.length;
+    // 预计算邻接边：先做水平可达性检查，避免路径穿墙
+    this.edges = new Array(N);
+    for (let k = 0; k < N; k++) this.edges[k] = [];
+    const addEdge = (a, b, cost) => { this.edges[a].push({ to: b, cost }); };
+    for (let k = 0; k < N; k++) {
+      const ci = this.nodeCell[k], ki = ci % this.w, kj = (ci / this.w) | 0, hk = this.nodeH[k];
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const ni = ki + di, nj = kj + dj;
+        if (ni < 0 || nj < 0 || ni >= this.w || nj >= this.h) continue;
+        for (const nk of this.cellNodes[nj * this.w + ni]) {
+          if (nk === k) continue;
+          const dh = this.nodeH[nk] - hk;
+          if (dh > JUMP_UP || dh < -DROP_DOWN) continue;
+          if (!this.edgeClear(k, nk)) continue;
+          let cost;
+          if (dh > STEP_UP) cost = 2.8 + dh * 2.2;
+          else if (dh < -STEP_UP) cost = 1.0 - dh * 0.4;
+          else cost = (di && dj) ? 1.4142 : 1;
+          addEdge(k, nk, cost);
+        }
+      }
+      // 跨格跳：格子边缘缺节点时，补齐 1m 左右的箱顶跳跃
+      for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) {
+        const cheb = Math.max(Math.abs(di), Math.abs(dj));
+        if (cheb < 2) continue;
+        const ni = ki + di, nj = kj + dj;
+        if (ni < 0 || nj < 0 || ni >= this.w || nj >= this.h) continue;
+        for (const nk of this.cellNodes[nj * this.w + ni]) {
+          const dh = this.nodeH[nk] - hk;
+          if (dh > STEP_UP) {
+            if (dh > JUMP_UP) continue;
+            if (!this.edgeClear(k, nk)) continue;
+            addEdge(k, nk, 3.2 + cheb * 0.8 + dh * 2.5);
+          } else if (Math.abs(dh) <= STEP_UP) {
+            // 跨格平地：要求中点有连续支撑面，避免从空中跨过缺口
+            const mx = (this.nodeX[k] + this.nodeX[nk]) / 2, mz = (this.nodeZ[k] + this.nodeZ[nk]) / 2;
+            const top = Math.max(this.nodeH[k], this.nodeH[nk]);
+            const sup = this.world.support(mx, mz, this.agentR * 0.8, top + 0.45);
+            if (!sup || Math.abs(sup.y - top) > 0.55) continue;
+            if (!this.edgeClear(k, nk)) continue;
+            addEdge(k, nk, cheb * 0.7 + Math.abs(dh) * 1.5);
+          }
+        }
+      }
+    }
+    this.g = new Float32Array(N);
+    this.f = new Float32Array(N);
+    this.parent = new Int32Array(N);
+    this.seen = new Uint32Array(N);
+    this.closed = new Uint32Array(N);
     this.gen = 1;
   }
+
+  // 站在 (cx,h,cz) 时身体是否被挡住；允许 0.45m 以内的台阶
+  clear(cx, h, cz) {
+    const r = this.agentR * 0.85, o = {};
+    const cands = this.world.query(cx - r, cz - r, cx + r, cz + r);
+    for (const c of cands) {
+      if (!c.solid) continue;
+      if (c.top <= h + STEP_UP) continue;
+      if (c.bottom >= h + 1.55) continue;
+      if (World.circleOBB(c, cx, cz, r, o)) return false;
+    }
+    return true;
+  }
+
   idx(x, z) {
     const i = Math.floor((x - this.x0) / this.cell), j = Math.floor((z - this.z0) / this.cell);
     if (i < 0 || j < 0 || i >= this.w || j >= this.h) return -1;
     return j * this.w + i;
   }
-  center(k) { return [this.x0 + ((k % this.w) + 0.5) * this.cell, this.z0 + (((k / this.w) | 0) + 0.5) * this.cell]; }
-  walkable(k) { return k >= 0 && !this.block[k]; }
-  nearestFree(k) {
-    if (this.walkable(k)) return k;
-    const i0 = k % this.w, j0 = (k / this.w) | 0;
-    for (let r = 1; r < 12; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
-      if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
-      const i = i0 + di, j = j0 + dj;
-      if (i < 0 || j < 0 || i >= this.w || j >= this.h) continue;
-      const kk = j * this.w + i; if (!this.block[kk]) return kk;
+
+  nearestNode(x, z, y) {
+    const ci = this.idx(x, z);
+    if (ci < 0) return -1;
+    const i0 = ci % this.w, j0 = (ci / this.w) | 0;
+    let best = -1, bestScore = Infinity;
+    for (let r = 0; r <= 8; r++) {
+      for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+        if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+        const i = i0 + di, j = j0 + dj;
+        if (i < 0 || j < 0 || i >= this.w || j >= this.h) continue;
+        for (const id of this.cellNodes[j * this.w + i]) {
+          const d = Math.hypot(this.nodeX[id] - x, this.nodeZ[id] - z);
+          const s = d + Math.abs(this.nodeH[id] - y) * 3;
+          if (s < bestScore) { bestScore = s; best = id; }
+        }
+      }
+      if (best >= 0 && bestScore < this.cell * 1.5) break;
     }
-    return -1;
+    return best;
   }
-  // 网格视线（Bresenham 采样）
-  lineFree(ax, az, bx, bz) {
-    const d = Math.hypot(bx - ax, bz - az);
-    const n = Math.ceil(d / (this.cell * 0.5));
+
+  // 水平边是否可走：中点处身体不能被墙挡住
+  edgeClear(a, b) {
+    const dx = this.nodeX[b] - this.nodeX[a], dz = this.nodeZ[b] - this.nodeZ[a];
+    const d = Math.hypot(dx, dz);
+    if (d < 1e-4) return true;
+    const jump = this.nodeH[b] - this.nodeH[a] > STEP_UP;
+    const y = Math.max(this.nodeH[a], this.nodeH[b]) + (jump ? 0.12 : 0.02);
+    const n = Math.max(2, Math.ceil(d / 0.45));
     for (let i = 1; i < n; i++) {
       const t = i / n;
-      const k = this.idx(ax + (bx - ax) * t, az + (bz - az) * t);
-      if (k < 0 || this.block[k]) return false;
+      if (!this.clear(this.nodeX[a] + dx * t, y, this.nodeZ[a] + dz * t)) return false;
     }
     return true;
   }
-  findPath(ax, az, bx, bz) {
-    let s = this.idx(ax, az), e = this.idx(bx, bz);
+
+  // 返回 [x,z,高度,是否需要跳上这个点]
+  findPath(ax, az, bx, bz, startY = 0, goalY = null) {
+    const s = this.nearestNode(ax, az, startY);
+    const targetY = goalY === null ? startY : goalY;
+    const e = this.nearestNode(bx, bz, targetY);
     if (s < 0 || e < 0) return null;
-    s = this.nearestFree(s); e = this.nearestFree(e);
-    if (s < 0 || e < 0) return null;
-    const gen = ++this.gen;
+    if (Math.abs(this.nodeH[e] - targetY) > 0.45) return null;
     const W = this.w;
-    const heap = []; // 二叉堆存 idx
+    const gen = ++this.gen;
     const g = this.g, f = this.f;
+    const heap = [];
     const push = (k) => {
       heap.push(k); let i = heap.length - 1;
       while (i > 0) { const p = (i - 1) >> 1; if (f[heap[p]] <= f[heap[i]]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; }
@@ -351,49 +451,53 @@ export class NavGrid {
       }
       return top;
     };
-    const ex = e % W, ez = (e / W) | 0;
-    const hfn = (k) => { const dx = Math.abs(k % W - ex), dz = Math.abs(((k / W) | 0) - ez); return (dx + dz + (1.4142 - 2) * Math.min(dx, dz)); };
+    const ei = e % W, ej = (e / W) | 0, eh = this.nodeH[e];
+    const hfn = (k) => {
+      const ci = this.nodeCell[k], i = ci % W, j = (ci / W) | 0;
+      const dx = Math.abs(i - ei), dz = Math.abs(j - ej);
+      return dx + dz + (1.4142 - 2) * Math.min(dx, dz) + Math.abs(this.nodeH[k] - eh) * 0.8;
+    };
     g[s] = 0; f[s] = hfn(s); this.seen[s] = gen; this.parent[s] = -1; push(s);
     let found = false, iter = 0;
-    while (heap.length && iter++ < 20000) {
+    while (heap.length && iter++ < 40000) {
       const k = pop();
       if (this.closed[k] === gen) continue;
       this.closed[k] = gen;
       if (k === e) { found = true; break; }
-      const ki = k % W, kj = (k / W) | 0;
-      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-        if (!di && !dj) continue;
-        const ni = ki + di, nj = kj + dj;
-        if (ni < 0 || nj < 0 || ni >= W || nj >= this.h) continue;
-        const nk = nj * W + ni;
-        if (this.block[nk] || this.closed[nk] === gen) continue;
-        if (di && dj && (this.block[kj * W + ni] || this.block[nj * W + ki])) continue;
-        const ng = g[k] + (di && dj ? 1.4142 : 1) * this.cost[nk];
+      const edges = this.edges[k];
+      for (let j = 0; j < edges.length; j++) {
+        const ed = edges[j], nk = ed.to;
+        if (this.closed[nk] === gen) continue;
+        const ng = g[k] + ed.cost;
         if (this.seen[nk] !== gen || ng < g[nk]) {
           this.seen[nk] = gen; g[nk] = ng; f[nk] = ng + hfn(nk); this.parent[nk] = k; push(nk);
         }
       }
     }
     if (!found) return null;
-    const raw = [];
-    for (let k = e; k !== -1; k = this.parent[k]) raw.push(this.center(k));
-    raw.reverse();
-    raw[raw.length - 1] = [bx, bz];
-    // 拉直
-    const out = [raw[0]];
-    let a = 0;
-    while (a < raw.length - 1) {
-      let b = raw.length - 1;
-      while (b > a + 1 && !this.lineFree(raw[a][0], raw[a][1], raw[b][0], raw[b][1])) b--;
-      out.push(raw[b]); a = b;
+    const ids = [];
+    for (let k = e; k !== -1; k = this.parent[k]) ids.push(k);
+    ids.reverse();
+    const out = [];
+    for (let n = 0; n < ids.length; n++) {
+      const id = ids[n], prev = n > 0 ? ids[n - 1] : -1;
+      const jump = prev >= 0 && this.nodeH[id] - this.nodeH[prev] > STEP_UP;
+      out.push([this.nodeX[id], this.nodeZ[id], this.nodeH[id], jump]);
     }
+    out[0][0] = ax; out[0][1] = az;
+    const last = out[out.length - 1];
+    last[0] = bx; last[1] = bz; last[2] = targetY;
     return out;
   }
-  randomFree(rnd, x0, z0, x1, z1) {
-    for (let t = 0; t < 60; t++) {
+
+  randomFree(rnd, x0, z0, x1, z1, y = 0) {
+    for (let t = 0; t < 100; t++) {
       const x = x0 + rnd() * (x1 - x0), z = z0 + rnd() * (z1 - z0);
-      const k = this.idx(x, z);
-      if (this.walkable(k)) return [x, z];
+      const ci = this.idx(x, z);
+      if (ci < 0) continue;
+      for (const id of this.cellNodes[ci]) {
+        if (Math.abs(this.nodeH[id] - y) < 0.3) return [this.nodeX[id], this.nodeZ[id], this.nodeH[id]];
+      }
     }
     return null;
   }

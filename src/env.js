@@ -284,7 +284,7 @@ export class Environment {
     this.scene.environment = this.envRT.texture;
     this.scene.environmentIntensity = this.preset.envInt;
     for (const s of this.extraScenes || []) s.environment = this.envRT.texture;
-    sky2.material.dispose(); disk.geometry.dispose(); disk.material.dispose();
+    sky2.geometry.dispose(); sky2.material.dispose(); disk.geometry.dispose(); disk.material.dispose();
   }
   update(dt, t, camPos) {
     this.shipDist += dt * this.shipSpeed;

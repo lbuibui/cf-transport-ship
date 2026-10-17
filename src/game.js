@@ -4,7 +4,7 @@ import { Renderer } from './render.js';
 import { buildTextures } from './textures.js';
 import { buildMap } from './map.js';
 import { Environment } from './env.js';
-import { World, NavGrid } from './physics.js';
+import { World, SurfaceNav } from './physics.js';
 import { Effects } from './effects.js';
 import { ViewModel } from './viewmodel.js';
 import { HUD } from './hud.js';
@@ -26,6 +26,9 @@ export class Game {
     this.playing = false; this.paused = false; this.locked = false;
     this.actors = []; this.nades = []; this.timers = []; this.tags = [];
     this.score = { BL: 0, GR: 0 };
+    this.matchId = 0;
+    this.matchWinner = undefined;
+    this.matchScore = null;
     this.audio = audio;
     this.qs = new URLSearchParams(location.search);
     this.shell = globalThis.desktopShell || null;
@@ -65,7 +68,7 @@ export class Game {
     this.vm = new ViewModel(this.renderer.vmScene, this.T, this.opts.team);
     this.hud.loading(0.8, '计算寻路网格');
     await nextFrame();
-    this.nav = new NavGrid(this.world, -36.2, -12.1, 36.2, 12.1, 0.5, 0.42);
+    this.nav = new SurfaceNav(this.world, -36.2, -12.1, 36.2, 12.1, 0.5, 0.42);
     this.hud.buildRadar(this.world);
     this.hud.loading(0.88, '武器图标 / 预编译着色器');
     await nextFrame();
@@ -132,13 +135,29 @@ export class Game {
   }
 
   // ================= 流程 =================
+  // 清理上一局的场景对象与它们独占的 GPU 资源。
+  // 地图、贴图、枪械模型由模块级缓存共用，不在这里释放。
+  clearField() {
+    for (const a of this.actors) {
+      this.renderer.scene.remove(a.soldier.root);
+      a.soldier.dispose();
+    }
+    for (const t of this.tags) {
+      this.renderer.scene.remove(t.sprite);
+      const m = t.sprite.material;
+      if (m.map) m.map.dispose();
+      m.dispose();
+    }
+    for (const n of this.nades) this.renderer.scene.remove(n.mesh);
+    this.actors = []; this.tags = []; this.nades = []; this.timers = [];
+    this.aimTarget = null;
+  }
   startMatch() {
     const o = this.opts;
     audio.init(); audio.setVolumes({ master: o.vol }); audio.startAmbient(); audio.playUI('start');
-    for (const a of this.actors) this.renderer.scene.remove(a.soldier.root);
-    for (const t of this.tags) this.renderer.scene.remove(t.sprite);
-    for (const n of this.nades) this.renderer.scene.remove(n.mesh);
-    this.actors = []; this.nades = []; this.tags = []; this.timers = [];
+    this.clearField();
+    this.matchId++;
+    this.matchWinner = undefined; this.matchScore = null;
     this.score = { BL: 0, GR: 0 };
     this.goal = o.goal; this.timeLeft = 600;
     this.env.apply(o.tod);
@@ -235,12 +254,12 @@ export class Game {
     if (!fromLock) this.lock();
   }
   quitToMenu() {
-    this.playing = false; this.paused = false; this.ended = true;
+    this.playing = false; this.paused = false; this.ended = true; this.inLoadout = false;
+    this.matchId++;
     audio.stopAmbient(); audio.setLowHealth(false);
-    for (const a of this.actors) this.renderer.scene.remove(a.soldier.root);
-    for (const t of this.tags) this.renderer.scene.remove(t.sprite);
-    this.actors = []; this.tags = [];
+    this.clearField();
     this.player = null;
+    this.killedBy = '';
     this.vm.setVisible(false);
     if (document.pointerLockElement) document.exitPointerLock();
     this.hud.show('menu');
@@ -292,15 +311,27 @@ export class Game {
     if (this.shell) this.shell.quit();
     else this.quitToMenu();
   }
-  endMatch() {
-    this.ended = true; this.playing = false;
+  // 结束对局：先锁定比分与胜负，再决定何时显示结算。
+  // delayMs > 0 时保留最后 1.2 秒的击杀画面，但期间的伤害与计分已经停止。
+  endMatch(delayMs = 0) {
+    if (this.ended) return;
+    this.ended = true;
     const my = this.player.team, other = my === 'BL' ? 'GR' : 'BL';
     const win = this.score[my] === this.score[other] ? null : this.score[my] > this.score[other];
-    this.hud.endScreen(win, this.score, this.actors, this.player.id);
-    audio.playUI('roundEnd'); audio.setLowHealth(false);
-    audio.announce(win ? 'Mission accomplished' : win === null ? 'Draw' : 'Mission failed');
-    if (document.pointerLockElement) document.exitPointerLock();
-    this.vm.setVisible(false);
+    this.matchWinner = win;
+    this.matchScore = { ...this.score };
+    const id = this.matchId, score = this.matchScore, actors = this.actors, myId = this.player.id;
+    const finish = () => {
+      if (id !== this.matchId) return;
+      this.playing = false; this.paused = false;
+      this.hud.endScreen(win, score, actors, myId);
+      audio.playUI('roundEnd'); audio.setLowHealth(false);
+      audio.announce(win ? 'Mission accomplished' : win === null ? 'Draw' : 'Mission failed');
+      if (document.pointerLockElement) document.exitPointerLock();
+      this.vm.setVisible(false);
+    };
+    if (delayMs > 0) setTimeout(finish, delayMs);
+    else finish();
   }
 
   // ================= 战斗 =================
@@ -491,6 +522,7 @@ export class Game {
     for (const b of this.actors) if (b.hear && b.pos.distanceTo(p) < 40) b.hear(p, true);
   }
   damage(v, att, amt, part, wid, dir, wall, melee) {
+    if (this.ended) return;
     if (!v.alive || v.protectT > 0) return;
     if (att && att !== v && att.team === v.team) return;
     const def = WEAPONS[wid];
@@ -550,7 +582,7 @@ export class Game {
       this.killedBy = att && att !== v ? `被 <span style="color:${att.team === 'BL' ? '#ff9b70' : '#8cc8ff'}">${att.name}</span> 用 ${wn}${hs ? ' <span style="color:#ff5040">爆头</span>' : ''}击杀` : '你阵亡了';
     }
     this.fx.bloodSplat(v.pos);
-    if (this.score.BL >= this.goal || this.score.GR >= this.goal) setTimeout(() => { if (this.playing) this.endMatch(); }, 1200);
+    if (this.score.BL >= this.goal || this.score.GR >= this.goal) this.endMatch(1200);
   }
 
   // ================= 事件音效 =================
@@ -606,7 +638,7 @@ export class Game {
   }
   // 调试：无渲染快进
   fastForward(seconds, step = 1 / 30) {
-    for (let t = 0; t < seconds && this.playing; t += step) this.simulate(step);
+    for (let t = 0; t < seconds && this.playing && !this.ended; t += step) this.simulate(step);
     return { score: this.score, time: this.time.toFixed(1), kills: this.actors.map((a) => a.name + ':' + a.stats.k + '/' + a.stats.d).join(' ') };
   }
   simulate(dt) {
