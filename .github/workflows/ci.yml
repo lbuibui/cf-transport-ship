@@ -16,6 +16,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: lockfile 只能指向公开源
+        run: npm run check:lockfile
       - run: npm ci
       - run: npm run build
       - run: npm run smoke
@@ -35,6 +37,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: lockfile 只能指向公开源
+        run: npm run check:lockfile
       - run: npm ci
       - run: npm run smoke:desktop
       - uses: actions/upload-artifact@v7

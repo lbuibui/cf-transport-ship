@@ -18,6 +18,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: lockfile 只能指向公开源
+        run: npm run check:lockfile
       - run: npm ci
       - name: tag 与 package.json 版本一致
         run: |

@@ -16,7 +16,8 @@
     "desktop": "node build.mjs && electron .",
     "desktop:dev": "node build.mjs --dev && electron . --dev",
     "smoke:desktop": "node build.mjs && node smoke-desktop.mjs",
-    "check": "node build.mjs && node smoke.mjs && node smoke-desktop.mjs",
+    "check": "node tools/check-lockfile.mjs && node build.mjs && node smoke.mjs && node smoke-desktop.mjs",
+    "check:lockfile": "node tools/check-lockfile.mjs",
     "dist:mac": "node build.mjs && electron-builder --mac",
     "dist:win": "node build.mjs && electron-builder --win",
     "dist:linux": "node build.mjs && electron-builder --linux"
