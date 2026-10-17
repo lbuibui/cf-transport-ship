@@ -20,6 +20,17 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
 };
 
+// 指针锁依赖窗口焦点：冷启动或系统繁忙时首次点击会失败，重试几次
+const lockPointer = async (target, x, y, tries = 4) => {
+  for (let i = 0; i < tries; i++) {
+    await target.mouse.click(x, y);
+    await target.waitForTimeout(400);
+    const locked = await target.evaluate(() => document.pointerLockElement === document.getElementById('c'));
+    if (locked) return true;
+  }
+  return false;
+};
+
 const app = await electron.launch({ args: [here, '--smoke'], cwd: here });
 const page = await app.firstWindow();
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
@@ -82,10 +93,7 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus());
   await page.click('#btnStart');
   await page.waitForFunction(() => window.__game?.playing === true, null, { timeout: 30000 });
-  await page.mouse.click(640, 360);
-  await page.waitForTimeout(400);
-  const locked = await page.evaluate(() => document.pointerLockElement === document.getElementById('c'));
-  check('指针锁可用', locked);
+  check('指针锁可用', await lockPointer(page, 640, 360));
 
   // 改键后输入仍然生效
   const rebound = await page.evaluate(async () => {
@@ -125,14 +133,13 @@ if (!checks.some((c) => !c.ok)) {
     await touchApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus());
     await tp.click('#btnStart');
     await tp.waitForFunction(() => window.__game?.playing === true, null, { timeout: 30000 });
-    await tp.mouse.click(600, 400);
-    await tp.waitForTimeout(400);
+    const locked = await lockPointer(tp, 600, 400);
     const r = await tp.evaluate(() => ({
       touchMode: window.__game.touchMode,
       locked: document.pointerLockElement === document.getElementById('c'),
       joystick: !document.getElementById('touch').classList.contains('hidden'),
     }));
-    check('主指针为 coarse 时桌面端仍锁鼠标', coarse && !r.touchMode && r.locked && !r.joystick, JSON.stringify(r));
+    check('主指针为 coarse 时桌面端仍锁鼠标', coarse && !r.touchMode && r.locked && !r.joystick, `${JSON.stringify(r)} 点击 ${locked ? '成功' : '失败'}`);
   } catch (e) {
     check('主指针为 coarse 时桌面端仍锁鼠标', false, e.message);
   } finally {
