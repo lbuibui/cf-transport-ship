@@ -12,8 +12,13 @@ export class Player extends Actor {
     this.lookDX = 0; this.lookDY = 0;
     this.bobT = 0; this.land = 0; this.shakeT = 0;
     this.camRoll = 0;
+    this.camY = 0; this.camReady = false;
     this.deathCam = null;
     this.touch = { mx: 0, mz: 0, fire: false, jump: false, crouch: false };
+  }
+  spawn(sp) {
+    super.spawn(sp);
+    this.camReady = false; // 复活后重新对位，避免沿用死亡时的视高
   }
   // 输入监听只绑定一次，始终路由到当前玩家
   bind(canvas) {
@@ -128,7 +133,16 @@ export class Player extends Actor {
     if (this.landed && this.landSpeed > 3) this.land = Math.min(0.14, this.landSpeed * 0.012);
     this.land *= Math.exp(-dt * 7);
     const shake = g.fx.shake * 0.06;
-    this.eye(cam.position);
+    // 视高平滑：楼梯每级 0.26m，直接跟随脚底会让镜头每级硬跳一次。
+    // 只平滑落地状态的小幅变化；跳跃上升、快速下落、复活等大位移直接跟随。
+    const targetY = this.pos.y + this.eyeH;
+    const fastFall = !this.onGround && this.vel.y < -1;
+    if (!this.camReady || Math.abs(targetY - this.camY) > 0.6 || (!this.onGround && targetY > this.camY) || fastFall) {
+      this.camY = targetY; this.camReady = true;
+    } else {
+      this.camY += (targetY - this.camY) * (1 - Math.exp(-dt * 20));
+    }
+    cam.position.set(this.pos.x, this.camY, this.pos.z);
     cam.position.y += by - this.land + (Math.random() - 0.5) * shake;
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     cam.position.x += cy * bx + (Math.random() - 0.5) * shake;

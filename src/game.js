@@ -618,7 +618,9 @@ export class Game {
     requestAnimationFrame(this.loop);
     // 桌面端帧率上限：无上限时交给 Chromium 的垂直同步
     const cap = +this.opts.frameCap || 0;
-    if (cap > 0 && this.drawing && now - this.drawing < 1000 / cap - 0.6) { this.last = now; return; }
+    // 跳过的帧不能推进 last：下一次真正绘制的 dt 必须覆盖这段等待时间。
+    // 否则模拟时间会按 cap/刷新率 变慢，例如 144Hz 屏设 60 上限时只有 0.33×。
+    if (cap > 0 && this.drawing && now - this.drawing < 1000 / cap - 0.6) return;
     this.drawing = now;
     let dt = (now - this.last) / 1000; this.last = now;
     if (dt > 0.1) dt = 0.1;
