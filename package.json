@@ -16,6 +16,7 @@
     "desktop": "node build.mjs && electron .",
     "desktop:dev": "node build.mjs --dev && electron . --dev",
     "smoke:desktop": "node build.mjs && node smoke-desktop.mjs",
+    "check": "node build.mjs && node smoke.mjs && node smoke-desktop.mjs",
     "dist:mac": "node build.mjs && electron-builder --mac",
     "dist:win": "node build.mjs && electron-builder --win",
     "dist:linux": "node build.mjs && electron-builder --linux"
@@ -27,5 +28,8 @@
     "playwright-core": "^1.63.0",
     "three": "^0.186.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
 }
