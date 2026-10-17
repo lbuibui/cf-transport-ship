@@ -116,6 +116,12 @@ try {
     g.goal = 100; g.timeLeft = 600;
     const pick = () => g.actors.find((a) => !a.isPlayer && a.alive && a.pos.y < 0.5 && !a.__used) || null;
     const run = (bot, target) => {
+      // 只让被测机器人参与模拟：其他 bot 会推挤或挡路，导致偶发失败
+      const allActors = g.actors;
+      g.actors = [bot];
+      // 固定从出生点出发，避免随机位置走出不可执行的路径
+      bot.spawn(g.map.spawns[bot.team][0]);
+      bot.onSpawn();
       bot.think = () => {}; // 不让 AI 改目标
       bot.goal = [target.x, target.z]; bot.goalHeight = target.y;
       bot.goalLayer = target.y > 2.3 ? 'roof' : target.y > 0.5 ? 'high' : 'ground';
@@ -128,6 +134,7 @@ try {
         if (bot.pos.y > target.y - 0.5) reached = true;
         else if (reached) fell = true;
       }
+      g.actors = allActors;
       return { ok: reached && !fell, y: +bot.pos.y.toFixed(2), reached, fell };
     };
     const roofBot = pick();
