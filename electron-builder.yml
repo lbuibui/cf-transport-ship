@@ -1,0 +1,68 @@
+appId: com.evo.cftransportship
+productName: cf-transport-ship
+copyright: Copyright © 2026 EVO
+directories:
+  output: release
+  buildResources: build
+# 只需单文件 HTML 与主进程代码；three 与 esbuild 在构建期就已打进 HTML
+files:
+  - dist/index.html
+  - desktop/**
+  - package.json
+asar: true
+mac:
+  category: public.app-category.games
+  icon: build/icon.png
+  # 未签名分发：如需签名公证，删除 identity 一行并设置 CSC_LINK / CSC_KEY_PASSWORD
+  identity: null
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  extendInfo:
+    CFBundleDisplayName: CF-运输船
+    NSHighResolutionCapable: true
+    NSRequiresAquaSystemAppearance: false
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+win:
+  icon: build/icon.png
+  # 只出 x64：Windows on ARM 靠系统仿真运行；需要原生 arm64 时加 --arm64 单独出包
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: CF-运输船
+linux:
+  icon: build/icon.png
+  category: Game
+  maintainer: evo
+  # 让窗口能被桌面环境归到同一个应用图标上
+  syncDesktopName: true
+  desktop:
+    entry:
+      Name: CF-运输船
+      Comment: 货轮场景 3D 战术竞技
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
+deb:
+  # 中文界面需要 CJK 字体；托盘依赖保持默认
+  recommends:
+    - libappindicator3-1
+    - fonts-noto-cjk
