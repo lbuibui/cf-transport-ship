@@ -4,6 +4,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 重新发布的版本号，留空则用 package.json 的版本
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -12,6 +17,8 @@ jobs:
   verify:
     name: 版本校验与冒烟
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -21,11 +28,19 @@ jobs:
       - name: lockfile 只能指向公开源
         run: npm run check:lockfile
       - run: npm ci
-      - name: tag 与 package.json 版本一致
+      - name: 确定版本号并与 package.json 对齐
+        id: version
         run: |
-          tag="${GITHUB_REF_NAME#v}"
           pkg="$(node -p "require('./package.json').version")"
-          test "$tag" = "$pkg" || { echo "tag $tag 与 package.json $pkg 不一致"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.version }}"
+            [ -n "$version" ] || version="$pkg"
+          fi
+          test "$version" = "$pkg" || { echo "版本 $version 与 package.json 的 $pkg 不一致"; exit 1; }
+          echo "版本校验通过：$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - run: npm run build
       - run: npm run smoke
 
@@ -73,11 +88,18 @@ jobs:
           path: artifacts
           merge-multiple: true
       - name: 生成 sha256
+        # GitHub 上传时会把文件名里的空格换成点号，先把本地名字对齐，
+        # 否则 SHA256SUMS.txt 里的文件名与页面上的下载名对不上。
         run: |
           cd artifacts
+          for f in *; do
+            n="${f// /.}"
+            [ "$f" = "$n" ] || mv "$f" "$n"
+          done
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: v${{ needs.verify.outputs.version }}
           files: artifacts/*
           generate_release_notes: true
