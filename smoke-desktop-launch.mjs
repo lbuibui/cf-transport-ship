@@ -22,7 +22,7 @@ const check = (name, ok, detail = '') => {
 };
 
 const extra = process.platform === 'linux'
-  ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--no-sandbox', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-gpu-vsync', '--disable-frame-rate-limit']
+  ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--no-sandbox', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding']
   : [];
 // 发布流水线用 SMOKE_EXE 指向 electron-builder 的 unpacked 产物，验证 asar 载荷。
 const exe = process.env.SMOKE_EXE;
