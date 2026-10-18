@@ -33,8 +33,9 @@ export class Actor {
     return out.set(-Math.sin(y) * Math.cos(p), Math.sin(p), -Math.cos(y) * Math.cos(p));
   }
   giveLoadout(primary) {
-    this.primary = primary || this.primary;
-    this.inv = [new WeaponState(this.primary), new WeaponState('deagle'), new WeaponState('knife'), new WeaponState('he')];
+    const id = WEAPONS[primary]?.id === primary ? primary : 'ak47';
+    this.primary = id;
+    this.inv = [new WeaponState(id), new WeaponState('deagle'), new WeaponState('knife'), new WeaponState('he')];
     for (const w of this.inv) w.patternSeed = Math.random() * 6;
     this.slot = 0; this.lastSlot = 1;
     this.readyAt = this.game.time + 0.3;

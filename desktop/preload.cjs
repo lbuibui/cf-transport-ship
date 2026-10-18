@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('desktopShell', {
   getState: () => ipcRenderer.invoke('shell:get-state'),
   setWindowMode: (mode) => ipcRenderer.invoke('shell:set-window-mode', mode),
   setWindowSize: (width, height) => ipcRenderer.invoke('shell:set-window-size', { width, height }),
+  resetWindowSize: () => ipcRenderer.invoke('shell:reset-window-size'),
   quit: () => ipcRenderer.send('shell:quit'),
   openLogs: () => ipcRenderer.send('shell:open-logs'),
   onWindowModeChange: (cb) => {

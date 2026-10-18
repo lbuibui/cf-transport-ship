@@ -29,9 +29,11 @@ npm run desktop:dev    # 不压缩 + 开发者工具
 ## 校验
 
 ```bash
-npm run smoke          # 无头浏览器：画布、WebGL、零报错
-npm run smoke:desktop  # Electron 端到端 15 项检查
-npm run check          # 上面三步依次执行
+npm test                     # 伤害、护甲、散布、射线与导航单测
+npm run smoke                # 无头浏览器：画布、WebGL、零报错
+npm run smoke:desktop        # Electron 端到端 19 项检查（macOS）
+npm run smoke:desktop:launch # Linux / Windows 启动冒烟
+npm run check                # lockfile、单测、构建、许可、两组冒烟
 ```
 
 冒烟脚本把截图写到 `.tmp/smoke/`，与 `dist/` 里的构建产物分开。
@@ -57,7 +59,10 @@ npm run dist:linux     # AppImage + deb，x64 与 arm64
 | `build.mjs` | esbuild 打包并把 JS 与 CSS 内联进单个 HTML |
 | `electron-builder.yml` | 三平台打包配置 |
 | `smoke.mjs` / `smoke-desktop.mjs` | 浏览器冒烟与 Electron 端到端冒烟 |
+| `smoke-desktop-launch.mjs` | Linux / Windows 桌面启动冒烟 |
+| `test/` | 战斗数值、武器、碰撞与寻路单测 |
 | `tools/make-icon.mjs` | 用本机 Chrome 渲染应用图标 |
+| `THIRD-PARTY-NOTICES.md` | three.js MIT 声明，随安装包分发 |
 
 桌面端的平台差异、签名状态与已知边界见 [desktop/README.md](desktop/README.md)。
 
@@ -65,8 +70,8 @@ npm run dist:linux     # AppImage + deb，x64 与 arm64
 
 - 版本号只写在 `package.json`，发布 tag 为 `v<version>`。
 - `dist/`、`release/`、`.tmp/`、`node_modules/` 不入库。
-- 发布流程：打 tag → CI 校验版本一致 → 构建与冒烟 → 三平台出包 → 产物与 sha256 挂到 GitHub Release。
+- 发布流程：打 tag → 校验版本一致 → 单测、构建与许可检查 → 浏览器/桌面冒烟 → 三平台出包 → 产物与 sha256 挂到 GitHub Release。
 
 ## 许可
 
-MIT，见 [LICENSE](LICENSE)。
+MIT，见 [LICENSE](LICENSE)；随包分发的 three.js 声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

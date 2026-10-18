@@ -60,11 +60,36 @@ try {
   check('键位已加载', env.keyCount === 11, `${env.keyCount} 项`);
   check('本地存储可用', env.origin.startsWith('app://'), env.origin);
 
+  // 旧配置可能带失效的主武器 id 与坏数值；应回落默认而不是让开局崩溃。
+  await page.evaluate(() => localStorage.setItem('cf_transport_ship_opts', JSON.stringify({
+    primary: 'removed_gun', size: 'x', fov: 'x', sens: 99, keys: { fwd: 'Not A Code' },
+  })));
+  await page.reload();
+  await page.waitForSelector('#menu:not(.hidden)', { timeout: 60000 });
+  const sanitized = await page.evaluate(() => ({
+    primary: window.__game.opts.primary,
+    size: window.__game.opts.size,
+    fov: window.__game.opts.fov,
+    sens: window.__game.opts.sens,
+    fwd: window.__game.opts.keys.fwd,
+  }));
+  check('坏配置回落默认', sanitized.primary === 'ak47' && sanitized.size === 6 && sanitized.fov === 78 && sanitized.sens === 3 && sanitized.fwd === 'KeyW', JSON.stringify(sanitized));
+
   const state = await page.evaluate(async () => {
     const st = await window.desktopShell.getState();
     return { version: st.version, electron: st.electron, displays: st.displays.length, fullscreen: st.fullscreen };
   });
   check('主进程 IPC 可用', state.displays > 0, `v${state.version} electron=${state.electron} 显示器 ${state.displays}`);
+
+  // 选 720p 后按「默认」应恢复默认尺寸，而不是保持 720p。
+  const beforeSize = await page.evaluate(async () => (await window.desktopShell.getState()).contentSize);
+  await page.evaluate(() => window.__game.applyResolution('1280x720'));
+  await page.waitForTimeout(900);
+  const size720 = await page.evaluate(async () => (await window.desktopShell.getState()).contentSize);
+  await page.evaluate(() => window.__game.applyResolution('auto'));
+  await page.waitForTimeout(900);
+  const sizeAuto = await page.evaluate(async () => (await window.desktopShell.getState()).contentSize);
+  check('默认分辨率恢复生效', size720[1] === 720 && sizeAuto[1] !== 720, `${beforeSize} → ${size720} → ${sizeAuto}`);
 
   // 菜单与改键面板截图，供人工核对
   await page.screenshot({ path: path.join(shots, 'desktop-menu.png') });

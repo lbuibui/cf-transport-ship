@@ -4,11 +4,15 @@ copyright: Copyright © 2026 EVO
 directories:
   output: release
   buildResources: build
-# 只需单文件 HTML 与主进程代码；three 与 esbuild 在构建期就已打进 HTML
+# 单文件 HTML、主进程代码与随包许可文本；three 与 esbuild 在构建期就已打进 HTML
 files:
   - dist/index.html
+  - dist/LICENSE.electron.txt
+  - dist/LICENSES.chromium.html
   - desktop/**
   - package.json
+  - LICENSE
+  - THIRD-PARTY-NOTICES.md
 asar: true
 mac:
   category: public.app-category.games

@@ -90,8 +90,8 @@ function tracerTex() {
 }
 
 export class Effects {
-  constructor(scene, T, camera) {
-    this.scene = scene; this.camera = camera; this.T = T;
+  constructor(scene, T, camera, world = null) {
+    this.scene = scene; this.camera = camera; this.T = T; this.world = world;
     this.add = new Particles(scene, T.glow, true, 900);
     this.smoke = new Particles(scene, T.puff, false, 900);
     this.decals = {
@@ -187,7 +187,10 @@ export class Effects {
       const a = Math.random() * 6.28, sp = 1 + Math.random() * 3;
       this.smoke.emit({ x: p.x + Math.cos(a) * 0.5, y: p.y + 0.4 + Math.random(), z: p.z + Math.sin(a) * 0.5, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 2, vz: Math.sin(a) * sp, life: 0, max: 3 + Math.random() * 3, s0: 1.2, s1: 5, r: 0.22, g: 0.21, b: 0.2, a0: 0.75, a1: 0, grav: -0.4, drag: 1.2 });
     }
-    this.decals.scorch.add(new THREE.Vector3(p.x, 0.01, p.z), new THREE.Vector3(0, 1, 0), 3.2);
+    // 焦痕落在爆点下方的实际支撑面上，不能固定写甲板高度。
+    const sup = this.world?.support(p.x, p.z, 0.3, p.y + 0.25);
+    const scorchY = (sup ? sup.y : p.y) + 0.012;
+    this.decals.scorch.add(new THREE.Vector3(p.x, scorchY, p.z), new THREE.Vector3(0, 1, 0), 3.2);
     this.shake = Math.max(this.shake, 1);
   }
   // 烟囱排烟 & 海鸥

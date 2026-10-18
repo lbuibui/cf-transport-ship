@@ -9,7 +9,8 @@ import { Effects } from './effects.js';
 import { ViewModel } from './viewmodel.js';
 import { HUD } from './hud.js';
 import { audio } from './audio.js';
-import { WEAPONS, jitterDir } from './weapons.js';
+import { WEAPONS, PRIMARIES, jitterDir } from './weapons.js';
+import { armorMitigation, bulletDamage, splashDamage } from './combat.js';
 import { buildGunMerged } from './guns.js';
 import { Player } from './player.js';
 import { Bot, BOT_NAMES } from './bots.js';
@@ -37,7 +38,8 @@ export class Game {
   async init() {
     this.hud = new HUD(this);
     this.opts = this.hud.opts;
-    if (this.qs.get('q')) this.opts.quality = this.qs.get('q');
+    const q = this.qs.get('q');
+    if (['low', 'medium', 'high'].includes(q)) this.opts.quality = q;
     if (this.desktop && this.shell) {
       try {
         const st = await this.shell.getState();
@@ -63,7 +65,7 @@ export class Game {
     this.env = new Environment(this.renderer.renderer, this.renderer.scene, this.opts.quality);
     this.env.extraScenes = [this.renderer.vmScene];
     this.env.apply(this.opts.tod);
-    this.fx = new Effects(this.renderer.scene, this.T, this.renderer.camera);
+    this.fx = new Effects(this.renderer.scene, this.T, this.renderer.camera, this.world);
     this.fx.initAmbient(this.map.funnelTop);
     this.vm = new ViewModel(this.renderer.vmScene, this.T, this.opts.team);
     this.hud.loading(0.8, '计算寻路网格');
@@ -159,16 +161,18 @@ export class Game {
     this.matchId++;
     this.matchWinner = undefined; this.matchScore = null;
     this.score = { BL: 0, GR: 0 };
-    this.goal = o.goal; this.timeLeft = 600;
+    this.goal = [30, 50, 100].includes(+o.goal) ? +o.goal : 50; this.timeLeft = 600;
     this.env.apply(o.tod);
-    const my = o.team, other = my === 'BL' ? 'GR' : 'BL';
+    const my = o.team === 'GR' ? 'GR' : 'BL', other = my === 'BL' ? 'GR' : 'BL';
+    const primary = PRIMARIES.includes(o.primary) ? o.primary : 'ak47';
+    const size = [4, 6, 8].includes(+o.size) ? +o.size : 6;
     const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
     let id = 0;
     this.player = new Player(this, { id: id++, name: '我', team: my });
-    this.player.primary = o.primary;
+    this.player.primary = primary;
     this.player.bind(document.getElementById('c'));
     this.actors.push(this.player);
-    const N = o.size;
+    const N = size;
     const prim = (team, i) => {
       if (i === 1 && N >= 4) return 'awm';
       if (i === 3 && N >= 6) return 'mp5';
@@ -231,10 +235,18 @@ export class Game {
   lock() {
     if (this.touchMode || this.qs.has('nolock')) { this.locked = true; return; }
     const c = document.getElementById('c');
+    // 无手势、跨域或浏览器拒绝时，requestPointerLock 的 Promise 也会 reject。
+    // 两次调用都要接住，否则控制台会冒出未处理的 pageerror。
+    const plain = () => {
+      try {
+        const q = c.requestPointerLock();
+        if (q && q.catch) q.catch(() => { /* 保持未锁定 */ });
+      } catch (e) { /* 忽略 */ }
+    };
     try {
       const p = c.requestPointerLock({ unadjustedMovement: true });
-      if (p && p.catch) p.catch(() => { try { c.requestPointerLock(); } catch (e) { /* 忽略 */ } });
-    } catch (e) { try { c.requestPointerLock(); } catch (e2) { /* 忽略 */ } }
+      if (p && p.catch) p.catch(plain);
+    } catch (e) { plain(); }
   }
   onLockChange() {
     this.locked = document.pointerLockElement === document.getElementById('c');
@@ -275,6 +287,7 @@ export class Game {
     this.inLoadout = false; this.hud.show(null); this.lock();
   }
   chooseLoadout(id) {
+    if (!PRIMARIES.includes(id)) return;
     const p = this.player;
     p.nextPrimary = id; this.opts.primary = id; this.hud.saveOpts();
     const inSpawn = p.alive && (p.team === 'BL' ? p.pos.x < -28.3 : p.pos.x > 28.3);
@@ -299,7 +312,14 @@ export class Game {
     this.shell?.setWindowMode(mode);
   }
   applyResolution(res) {
-    if (!this.shell || !res || res === 'auto') return;
+    if (!this.shell || !res) return;
+    if (res === 'auto') {
+      const p = this.shell.resetWindowSize?.();
+      if (p?.then) p.then((size) => {
+        if (size) this.hud.toast(`已恢复默认窗口 ${size.width}×${size.height}`, 2);
+      }).catch(() => { /* 忽略 */ });
+      return;
+    }
     const [w, h] = String(res).split('x').map(Number);
     if (!w || !h) return;
     this.shell.setWindowSize(w, h).then((size) => {
@@ -390,8 +410,7 @@ export class Game {
       if (best) {
         const pt = o.clone().addScaledVector(dir, bestT);
         const dist = bestT;
-        const partMul = part === 'head' ? d.headMul : part === 'arm' || part === 'leg' ? d.limbMul : 1;
-        const dmg = d.dmg * mul * Math.pow(d.falloff, dist / 10) * partMul;
+        const dmg = bulletDamage(d, d.dmg * mul, dist, part);
         this.fx.impact(pt, _v.copy(dir).negate(), 'flesh', dir);
         if (part === 'head') this.fx.impact(pt, _v.copy(dir).negate(), 'flesh', dir);
         audio.playImpact(pt, 'flesh');
@@ -515,8 +534,7 @@ export class Game {
       if (dist > d.radius) continue;
       const dir = c.clone().sub(p); const L = dir.length(); dir.divideScalar(L || 1);
       const blocked = this.world.raycast(p.x, p.y + 0.2, p.z, dir.x, dir.y, dir.z, Math.max(0, L - 0.3), 'bullet');
-      let dmg = d.dmg * Math.pow(1 - dist / d.radius, 1.1);
-      if (blocked) dmg *= 0.2;
+      const dmg = splashDamage(d.dmg, d.radius, dist, blocked);
       if (dmg > 1) this.damage(a, owner, dmg, 'chest', 'he', dir, false);
     }
     for (const b of this.actors) if (b.hear && b.pos.distanceTo(p) < 40) b.hear(p, true);
@@ -526,12 +544,8 @@ export class Game {
     if (!v.alive || v.protectT > 0) return;
     if (att && att !== v && att.team === v.team) return;
     const def = WEAPONS[wid];
-    let hpD = amt;
-    if (v.armor > 0 && part !== 'leg') {
-      const ap = def?.armorPen ?? 0.75;
-      hpD = amt * ap;
-      v.armor = Math.max(0, v.armor - amt * (1 - ap) * 1.4);
-    }
+    const { hpDamage: hpD, armorLoss } = armorMitigation(v.armor, amt, part, def);
+    if (armorLoss) v.armor = Math.max(0, v.armor - armorLoss);
     v.hp -= hpD;
     v.lastAttacker = att; v.lastHurt = this.time;
     const killed = v.hp <= 0;

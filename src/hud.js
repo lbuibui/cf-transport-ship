@@ -11,6 +11,63 @@ const BADGE_SVG = (color, inner) => `<svg viewBox="0 0 100 100" xmlns="http://ww
 const SKULL = `<g fill="#fff"><path d="M50 22c-14 0-24 9-24 22 0 8 4 13 9 16v9h30v-9c5-3 9-8 9-16 0-13-10-22-24-22z"/><rect x="40" y="66" width="4" height="8"/><rect x="48" y="66" width="4" height="8"/><rect x="56" y="66" width="4" height="8"/></g><circle cx="41" cy="45" r="6" fill="#3a1500"/><circle cx="59" cy="45" r="6" fill="#3a1500"/>`;
 const CROSSHAIR_B = `<g fill="none" stroke="#fff" stroke-width="4"><circle cx="50" cy="50" r="20"/><path d="M50 18v14M50 68v14M18 50h14M68 50h14"/></g><circle cx="50" cy="50" r="5" fill="#ff3020"/>`;
 
+const OPT_TEAMS = ['BL', 'GR'];
+const OPT_SIZES = [4, 6, 8];
+const OPT_DIFFS = ['easy', 'normal', 'hard', 'hell'];
+const OPT_GOALS = [30, 50, 100];
+const OPT_TODS = ['day', 'dusk'];
+const OPT_QUALITIES = ['low', 'medium', 'high'];
+const OPT_FRAME_CAPS = [0, 60, 120, 144];
+const KEY_CODE = /^[A-Za-z0-9]{1,24}$/;
+
+const numIn = (v, def, min, max) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
+};
+
+function validResolution(v) {
+  if (v === 'auto') return true;
+  const m = /^(\d{3,5})x(\d{3,5})$/.exec(v);
+  return !!m && +m[1] >= 800 && +m[1] <= 7680 && +m[2] >= 600 && +m[2] <= 4320;
+}
+
+// localStorage 可能留着旧版本或手改的值。逐项校验，坏值回落默认，
+// 否则一个失效的主武器 id 就会让开局在 new WeaponState 处崩溃。
+function sanitizeKeys(raw) {
+  const keys = { ...DEFAULT_KEYS };
+  if (!raw || typeof raw !== 'object') return keys;
+  const used = new Set(Object.values(keys));
+  for (const id of Object.keys(DEFAULT_KEYS)) {
+    const code = raw[id];
+    if (typeof code === 'string' && KEY_CODE.test(code) && !used.has(code)) {
+      used.delete(keys[id]);
+      keys[id] = code;
+      used.add(code);
+    }
+  }
+  return keys;
+}
+
+function sanitizeOpts(base, raw) {
+  const o = { ...base, keys: { ...DEFAULT_KEYS } };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return o;
+  if (OPT_TEAMS.includes(raw.team)) o.team = raw.team;
+  if (PRIMARIES.includes(raw.primary)) o.primary = raw.primary;
+  if (OPT_SIZES.includes(+raw.size)) o.size = +raw.size;
+  if (OPT_DIFFS.includes(raw.diff)) o.diff = raw.diff;
+  if (OPT_GOALS.includes(+raw.goal)) o.goal = +raw.goal;
+  if (OPT_TODS.includes(raw.tod)) o.tod = raw.tod;
+  if (OPT_QUALITIES.includes(raw.quality)) o.quality = raw.quality;
+  if (raw.windowMode === 'window' || raw.windowMode === 'fullscreen') o.windowMode = raw.windowMode;
+  if (validResolution(raw.resolution)) o.resolution = raw.resolution;
+  o.sens = numIn(raw.sens, base.sens, 0.2, 3);
+  o.fov = numIn(raw.fov, base.fov, 65, 100);
+  o.vol = numIn(raw.vol, base.vol, 0, 1);
+  o.frameCap = OPT_FRAME_CAPS.includes(+raw.frameCap) ? +raw.frameCap : 0;
+  o.keys = sanitizeKeys(raw.keys);
+  return o;
+}
+
 export class HUD {
   constructor(game) {
     this.g = game;
@@ -25,14 +82,13 @@ export class HUD {
     this.slotsT = 0;
     this.radarCtx = this.el.radar.getContext('2d');
     const touch = matchMedia('(pointer:coarse)').matches;
-    this.opts = { team: 'BL', primary: 'ak47', size: 6, diff: 'normal', goal: 50, tod: 'day', quality: touch && !this.g.desktop ? 'low' : 'high', sens: 1.0, fov: 78, vol: 0.8, windowMode: 'window', resolution: 'auto', frameCap: 0, keys: { ...DEFAULT_KEYS } };
+    const base = { team: 'BL', primary: 'ak47', size: 6, diff: 'normal', goal: 50, tod: 'day', quality: touch && !this.g.desktop ? 'low' : 'high', sens: 1.0, fov: 78, vol: 0.8, windowMode: 'window', resolution: 'auto', frameCap: 0, keys: { ...DEFAULT_KEYS } };
     try {
-      const saved = JSON.parse(localStorage.getItem('cf_transport_ship_opts') || '{}');
-      const keys = saved.keys;
-      delete saved.keys;
-      Object.assign(this.opts, saved);
-      if (keys) this.opts.keys = { ...DEFAULT_KEYS, ...keys };
-    } catch (e) { /* 忽略 */ }
+      this.opts = sanitizeOpts(base, JSON.parse(localStorage.getItem('cf_transport_ship_opts') || '{}'));
+      this.saveOpts(); // 把清洗结果写回，坏配置不会每次启动都重复触发
+    } catch (e) {
+      this.opts = sanitizeOpts(base, null);
+    }
     this.buildMenu();
   }
   saveOpts() { try { localStorage.setItem('cf_transport_ship_opts', JSON.stringify(this.opts)); } catch (e) { /* 忽略 */ } }
@@ -320,7 +376,11 @@ export class HUD {
   }
   drawRadar(me, actors, t) {
     const ctx = this.radarCtx, cv = this.el.radar;
-    const W = cv.width = cv.clientWidth * 1.5 | 0, H = cv.height = cv.clientHeight * 1.5 | 0;
+    const cw = cv.clientWidth, ch = cv.clientHeight;
+    if (!cw || !ch) return;
+    const W = Math.round(cw * 1.5), H = Math.round(ch * 1.5);
+    // 只在尺寸变化时重设画布；每帧赋值会重建 backing store。
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
     ctx.clearRect(0, 0, W, H);
     if (!this.radarImg) return;
     const S = this.radarS, zoom = 0.55 * (W / 294);

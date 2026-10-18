@@ -1,7 +1,7 @@
 // 桌面壳：Electron 主进程。
 // 职责：窗口与生命周期、app:// 协议、菜单、窗口状态、日志、单实例。
 // 游戏逻辑全部在 dist/index.html 内，主进程不参与模拟。
-import { app, BrowserWindow, Menu, ipcMain, protocol, screen, shell } from 'electron';
+import { app, BrowserWindow, Menu, dialog, ipcMain, protocol, screen, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,11 +48,31 @@ function log(...parts) {
 const stateFile = () => path.join(app.getPath('userData'), 'window-state.json');
 const DEFAULTS = { width: 1600, height: 900, x: undefined, y: undefined, maximized: false, fullscreen: false };
 
+// 旧窗口状态可能来自已拔掉的显示器：宽高夹到当前屏幕，位置完全不可见时交给系统居中。
+function clampState(raw) {
+  const areas = screen.getAllDisplays().map((d) => d.workArea);
+  const maxW = areas.length ? Math.max(1024, ...areas.map((a) => a.width)) : DEFAULTS.width;
+  const maxH = areas.length ? Math.max(640, ...areas.map((a) => a.height)) : DEFAULTS.height;
+  const s = { ...DEFAULTS, ...(raw && typeof raw === 'object' ? raw : {}) };
+  s.width = Math.round(Math.min(maxW, Math.max(1024, Number(s.width) || DEFAULTS.width)));
+  s.height = Math.round(Math.min(maxH, Math.max(640, Number(s.height) || DEFAULTS.height)));
+  s.maximized = !!s.maximized;
+  s.fullscreen = !!s.fullscreen;
+  const x = Number(s.x), y = Number(s.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) { delete s.x; delete s.y; return s; }
+  const visible = areas.some((a) => {
+    const overlapX = Math.min(x + s.width, a.x + a.width) - Math.max(x, a.x);
+    const overlapY = Math.min(y + s.height, a.y + a.height) - Math.max(y, a.y);
+    return overlapX >= 80 && overlapY >= 80;
+  });
+  if (!visible) { delete s.x; delete s.y; } else { s.x = Math.round(x); s.y = Math.round(y); }
+  return s;
+}
+
 function loadState() {
   if (isSmoke) return { ...DEFAULTS, width: 1280, height: 720 };
   try {
-    const raw = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
-    return { ...DEFAULTS, ...raw };
+    return clampState(JSON.parse(fs.readFileSync(stateFile(), 'utf8')));
   } catch { return { ...DEFAULTS }; }
 }
 
@@ -63,6 +83,17 @@ function saveState(win) {
     fs.mkdirSync(app.getPath('userData'), { recursive: true });
     fs.writeFileSync(stateFile(), JSON.stringify({ ...b, maximized: win.isMaximized(), fullscreen: win.isFullScreen() }, null, 2));
   } catch (e) { log('保存窗口状态失败', String(e)); }
+}
+
+// 拖动与缩放会连续触发事件，同步写盘会卡主进程。
+let saveTimer = null;
+function scheduleSaveState(win) {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { saveTimer = null; saveState(win); }, 250);
+}
+function flushSaveState(win) {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  saveState(win);
 }
 
 // ---------------- 窗口 ----------------
@@ -97,21 +128,33 @@ function createWindow() {
     if (isDev) win.webContents.openDevTools({ mode: 'detach' });
   });
 
-  // 状态与全屏变化同步到渲染进程，并写入磁盘
-  for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) win.on(ev, () => { if (restored) saveState(win); });
-  win.on('enter-full-screen', () => pushWindowMode(true));
-  win.on('leave-full-screen', () => pushWindowMode(false));
-  win.on('close', () => saveState(win));
-  win.on('closed', () => { win = null; });
+  // 状态与全屏变化同步到渲染进程，并延迟写盘
+  for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) win.on(ev, () => { if (restored) scheduleSaveState(win); });
+  win.on('enter-full-screen', () => { pushWindowMode(true); scheduleSaveState(win); });
+  win.on('leave-full-screen', () => { pushWindowMode(false); scheduleSaveState(win); });
+  win.on('close', () => flushSaveState(win));
+  win.on('closed', () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; } win = null; });
 
   // 渲染进程日志集中到主日志文件
   win.webContents.on('console-message', (a, level, message) => {
     const msg = a && typeof a === 'object' && 'message' in a ? `${a.message} (${a.sourceId || ''}:${a.lineNumber || 0})` : `${message} (${level})`;
     log('[renderer]', msg);
   });
+  // 只自动重启两次；连续崩溃时停下来，避免无休止 reload。
+  let crashes = 0, lastCrashAt = 0;
   win.webContents.on('render-process-gone', (_e, details) => {
     log('渲染进程退出', JSON.stringify(details));
-    if (!isSmoke && win && !win.isDestroyed()) win.reload();
+    if (isSmoke || !win || win.isDestroyed()) return;
+    const now = Date.now();
+    crashes = now - lastCrashAt < 60000 ? crashes + 1 : 1;
+    lastCrashAt = now;
+    if (crashes <= 2) {
+      log(`自动重启渲染进程（${crashes}/2）`);
+      win.reload();
+    } else {
+      log('渲染进程连续崩溃，停止自动重启');
+      dialog.showErrorBox('渲染进程反复崩溃', '请重启应用。若问题持续，把画质调到「流畅」，并在日志目录查看 main.log。');
+    }
   });
   win.webContents.on('unresponsive', () => log('渲染进程无响应'));
 
@@ -154,7 +197,7 @@ function buildMenu() {
     label: '帮助',
     submenu: [
       { label: '打开日志目录', click: () => shell.openPath(app.getPath('logs')) },
-      { label: '关于', click: () => shell.openPath(app.getPath('userData')) },
+      { label: '打开配置目录', click: () => shell.openPath(app.getPath('userData')) },
     ],
   };
   const template = isMac
@@ -188,6 +231,17 @@ function registerIpc() {
     if (win.isFullScreen()) win.setFullScreen(false);
     if (win.isMaximized()) win.unmaximize();
     win.setContentSize(Math.round(size.width), Math.round(size.height));
+    saveState(win);
+    const [width, height] = win.getContentSize();
+    return { width, height };
+  });
+  ipcMain.handle('shell:reset-window-size', () => {
+    if (!win) return null;
+    if (win.isFullScreen()) win.setFullScreen(false);
+    if (win.isMaximized()) win.unmaximize();
+    const area = screen.getDisplayMatching(win.getBounds()).workArea;
+    win.setContentSize(Math.min(DEFAULTS.width, area.width), Math.min(DEFAULTS.height, area.height));
+    win.center();
     saveState(win);
     const [width, height] = win.getContentSize();
     return { width, height };

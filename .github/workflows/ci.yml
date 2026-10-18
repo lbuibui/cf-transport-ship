@@ -6,22 +6,27 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: 构建与浏览器冒烟
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           cache: npm
       - name: lockfile 只能指向公开源
         run: npm run check:lockfile
       - run: npm ci
+      - run: npm test
       - run: npm run build
+      - run: npm run check:license
       - run: npm run smoke
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: smoke-browser
@@ -32,8 +37,8 @@ jobs:
     name: 桌面端冒烟
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           cache: npm
@@ -41,9 +46,40 @@ jobs:
         run: npm run check:lockfile
       - run: npm ci
       - run: npm run smoke:desktop
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: smoke-desktop
+          path: .tmp/smoke
+          if-no-files-found: ignore
+
+  # 补上 macOS 之外的启动验证。Linux 用 xvfb，Windows 直接跑；
+  # 只检查壳、WebGL、对局模拟与渲染循环，指针锁/全屏留在 macOS 冒烟。
+  desktop-launch:
+    name: 桌面启动冒烟 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: lockfile 只能指向公开源
+        run: npm run check:lockfile
+      - run: npm ci
+      - name: 启动冒烟（Linux / xvfb）
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run smoke:desktop:launch
+      - name: 启动冒烟（Windows）
+        if: runner.os == 'Windows'
+        run: npm run smoke:desktop:launch
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: smoke-desktop-launch-${{ matrix.os }}
           path: .tmp/smoke
           if-no-files-found: ignore
