@@ -61,11 +61,14 @@ try {
   await page.waitForFunction(() => window.__game?.playing === true, null, { timeout: 60000 });
   const sim = await page.evaluate(() => window.__game.fastForward(3));
   check('对局模拟正常', typeof sim.time === 'string' && sim.kills.length > 0, sim.kills);
-  const fps = await page.evaluate(async () => {
-    await new Promise((r) => setTimeout(r, 1200));
-    return window.__game.fps;
+  // 软件渲染（Linux xvfb / SwiftShader）可能只有几帧每秒；直接数渲染帧，
+  // 不用 fps 统计（它要累计 1 秒模拟时间，低帧率下会迟迟不出现）。
+  const frames = await page.evaluate(async () => {
+    const start = Date.now(), before = window.__game.frame;
+    while (Date.now() - start < 2500) await new Promise((r) => setTimeout(r, 100));
+    return { delta: window.__game.frame - before, fps: window.__game.fps };
   });
-  check('渲染循环运行', typeof fps === 'number' && fps > 0, `${fps} FPS`);
+  check('渲染循环运行', frames.delta > 0, `${frames.delta} 帧 / ${frames.fps ?? '…'} FPS`);
   await page.screenshot({ path: path.join(shots, 'desktop-launch.png') });
 } catch (e) {
   check('启动冒烟流程未抛异常', false, e.message);
