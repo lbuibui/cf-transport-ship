@@ -24,12 +24,12 @@ npm run dist:linux  # AppImage + deb，x64 与 arm64
 
 | 产物 | 平台 | 架构 | 体积（约） |
 |---|---|---|---|
-| `cf-transport-ship-1.1.2-arm64.dmg` | macOS | arm64 | 126 MB |
-| `cf-transport-ship.Setup.1.1.2.exe` | Windows | x64 | 109 MB |
-| `cf-transport-ship-1.1.2.AppImage` | Linux | x64 | 122 MB |
-| `cf-transport-ship_1.1.2_amd64.deb` | Debian / Ubuntu | x64 | 98 MB |
+| `cf-transport-ship-1.1.3-arm64.dmg` | macOS | arm64 | 126 MB |
+| `cf-transport-ship.Setup.1.1.3.exe` | Windows | x64 | 109 MB |
+| `cf-transport-ship-1.1.3.AppImage` | Linux | x64 | 122 MB |
+| `cf-transport-ship_1.1.3_amd64.deb` | Debian / Ubuntu | x64 | 98 MB |
 
-1.1.2 起随包附带 three.js、Electron 与 Chromium 的完整许可文本，压缩后体积约增加 2 MB。
+1.1.3 起随包附带 three.js、Electron 与 Chromium 的完整许可文本，压缩后体积约增加 2 MB。
 
 Windows 只出 x64，Windows on ARM 交给系统仿真运行。需要原生 arm64 时执行 `npx electron-builder --win --arm64`，注意安装包会翻倍到约 207 MB。
 
