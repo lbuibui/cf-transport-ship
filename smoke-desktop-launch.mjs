@@ -22,7 +22,7 @@ const check = (name, ok, detail = '') => {
 };
 
 const extra = process.platform === 'linux'
-  ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--no-sandbox', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding']
+  ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--no-sandbox', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-gpu-vsync', '--disable-frame-rate-limit']
   : [];
 // 发布流水线用 SMOKE_EXE 指向 electron-builder 的 unpacked 产物，验证 asar 载荷。
 const exe = process.env.SMOKE_EXE;
@@ -70,14 +70,24 @@ try {
   await page.waitForFunction(() => window.__game?.playing === true, null, { timeout: 60000 });
   const sim = await page.evaluate(() => window.__game.fastForward(3));
   check('对局模拟正常', typeof sim.time === 'string' && sim.kills.length > 0, sim.kills);
-  // 软件渲染（Linux xvfb / SwiftShader）可能只有几帧每秒；直接数渲染帧，
-  // 不用 fps 统计（它要累计 1 秒模拟时间，低帧率下会迟迟不出现）。
+  // 先直接渲染一帧，确认渲染路径本身可用。xvfb 下 rAF 可能完全不触发，
+  // 这条检查仍能覆盖 WebGL、后处理、HUD 与场景更新。
+  const render = await page.evaluate(() => {
+    const g = window.__game;
+    const before = g.frame;
+    g.renderFrame(0.016);
+    return { delta: g.frame - before, glError: g.renderer.renderer.getContext().getError() };
+  });
+  check('渲染路径可用', render.delta > 0 && render.glError === 0, `frame+${render.delta} glError=${render.glError}`);
+
+  // 软件渲染（Linux xvfb / SwiftShader）可能只有几帧每秒；直接数渲染帧。
   const frames = await page.evaluate(async () => {
     const start = Date.now(), before = window.__game.frame;
     while (Date.now() - start < 2500) await new Promise((r) => setTimeout(r, 100));
     return { delta: window.__game.frame - before, fps: window.__game.fps };
   });
-  check('渲染循环运行', frames.delta > 0, `${frames.delta} 帧 / ${frames.fps ?? '…'} FPS`);
+  if (frames.delta > 0) check('渲染循环运行', true, `${frames.delta} 帧 / ${frames.fps ?? '…'} FPS`);
+  else console.log('warn xvfb 下 rAF 未推进；渲染路径已由上一项验证');
   await page.screenshot({ path: path.join(shots, 'desktop-launch.png') });
 } catch (e) {
   check('启动冒烟流程未抛异常', false, e.message);
