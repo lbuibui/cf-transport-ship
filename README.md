@@ -2,6 +2,14 @@
 
 货轮场景的 3D 战术竞技游戏：团队死斗，潜伏者 vs 保卫者，机器人对战。基于 three.js，全部资源程序化生成，无外部素材、无运行时依赖。
 
+## 来源与二次开发
+
+本项目基于 [riba2534/claude-opus-5-5-demo](https://github.com/riba2534/claude-opus-5-5-demo) 中的「穿越火线·运输船」示例二次开发。
+
+原项目是用 Claude Opus 5.5 做的一次 one-shot 代码生成演示，包含三个可玩的 3D 网页游戏。本仓库沿用其运输船场景与团队死斗玩法，并在此基础上补齐桌面客户端、三平台打包、机器人导航与武器系统、自动化测试和发布流程。
+
+原项目仓库未附带 LICENSE 文件；本仓库以 MIT 许可发布，见 [LICENSE](LICENSE)。再分发或商用前请自行核对上游仓库的授权情况。
+
 ## 玩法
 
 - 目标：团队击杀数率先达到设定值（30 / 50 / 100）获胜，单局 10 分钟。
@@ -29,14 +37,18 @@ npm run desktop:dev    # 不压缩 + 开发者工具
 ## 校验
 
 ```bash
-npm test                     # 伤害、护甲、散布、射线与导航单测
+npm test                     # 189 项单测：战斗、武器、物理、导航、地图、资源、角色、AI、对局、UI 与音频
+npm run test:coverage        # 全源门禁：行 100 / 分支 88 / 函数 97
+npm run test:coverage:logic  # 逻辑层门禁：行 97 / 分支 85 / 函数 95
 npm run smoke                # 无头浏览器：画布、WebGL、零报错
 npm run smoke:desktop        # Electron 端到端 19 项检查（macOS）
 npm run smoke:desktop:launch # Linux / Windows 启动冒烟
-npm run check                # lockfile、单测、构建、许可、两组冒烟
+npm run check                # lockfile、覆盖门禁、构建、许可、两组冒烟
 ```
 
 冒烟脚本把截图写到 `.tmp/smoke/`，与 `dist/` 里的构建产物分开。
+`test/helpers/` 提供无头 Canvas/DOM 与 WebAudio 桩，让资源、角色、UI 与音频在 Node 里执行。
+`test:coverage` 守住全源 100% 行覆盖。
 
 ## 打包
 
@@ -60,7 +72,7 @@ npm run dist:linux     # AppImage + deb，x64 与 arm64
 | `electron-builder.yml` | 三平台打包配置 |
 | `smoke.mjs` / `smoke-desktop.mjs` | 浏览器冒烟与 Electron 端到端冒烟 |
 | `smoke-desktop-launch.mjs` | Linux / Windows 桌面启动冒烟 |
-| `test/` | 战斗数值、武器、碰撞与寻路单测 |
+| `test/` | 189 项单测与无头 Canvas / DOM / WebAudio 桩 |
 | `tools/make-icon.mjs` | 用本机 Chrome 渲染应用图标 |
 | `THIRD-PARTY-NOTICES.md` | three.js MIT 声明，随安装包分发 |
 
@@ -74,4 +86,4 @@ npm run dist:linux     # AppImage + deb，x64 与 arm64
 
 ## 许可
 
-MIT，见 [LICENSE](LICENSE)；随包分发的 three.js 声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+MIT，见 [LICENSE](LICENSE)；随包分发的 three.js 声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。本项目基于 [riba2534/claude-opus-5-5-demo](https://github.com/riba2534/claude-opus-5-5-demo) 二次开发，上游仓库未附带 LICENSE 文件，再分发前请核对上游授权。
