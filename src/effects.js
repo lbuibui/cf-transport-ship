@@ -226,8 +226,9 @@ export class Effects {
     const speed = 380;
     this.tracers = this.tracers.filter((tr) => {
       tr.t += dt;
-      const head = Math.min(tr.len, tr.t * speed), tail = Math.max(0, head - 7);
+      const headRaw = tr.t * speed, tail = Math.max(0, headRaw - 7);
       if (tail >= tr.len) return false;
+      const head = Math.min(tr.len, headRaw);
       const mid = pv.copy(tr.from).addScaledVector(tr.dir, (head + tail) / 2);
       const toCam = camPos.clone().sub(mid).normalize();
       const up = new THREE.Vector3().crossVectors(tr.dir, toCam).normalize();

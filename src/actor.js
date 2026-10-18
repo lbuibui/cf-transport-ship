@@ -12,6 +12,7 @@ export class Actor {
     this.pos = new THREE.Vector3(); this.vel = new THREE.Vector3();
     this.radius = 0.36; this.height = STAND_H; this.stepHeight = 0.42;
     this.onGround = false; this.crouch = false; this.eyeH = EYE_STAND;
+    this.jumpCD = 0;
     this.yaw = 0; this.pitch = 0; this.punchP = 0; this.punchY = 0; this.aimPunch = 0;
     this.hp = 100; this.armor = 100; this.alive = false; this.deadT = 0; this.respawnT = 0; this.protectT = 0;
     this.inv = []; this.slot = 0; this.lastSlot = 1; this.readyAt = 0;

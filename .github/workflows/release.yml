@@ -41,7 +41,7 @@ jobs:
           test "$version" = "$pkg" || { echo "版本 $version 与 package.json 的 $pkg 不一致"; exit 1; }
           echo "版本校验通过：$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - run: npm test
+      - run: npm run test:coverage
       - run: npm run build
       - run: npm run check:license
       - run: npm run smoke

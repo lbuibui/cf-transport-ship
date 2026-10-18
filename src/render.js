@@ -1,10 +1,10 @@
 // 渲染管线：世界 -> 第一人称武器层 -> 泛光 -> 屏幕特效 -> 输出
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { EffectComposer as EffectComposerImport } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass as RenderPassImport } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass as UnrealBloomPassImport } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass as ShaderPassImport } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass as OutputPassImport } from 'three/addons/postprocessing/OutputPass.js';
 
 const FXShader = {
   uniforms: {
@@ -50,9 +50,15 @@ const FXShader = {
 };
 
 export class Renderer {
-  constructor(canvas, quality) {
+  constructor(canvas, quality, deps = {}) {
     this.quality = quality;
-    const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
+    const WebGLRenderer = deps.WebGLRenderer || THREE.WebGLRenderer;
+    const EffectComposer = deps.EffectComposer || EffectComposerImport;
+    const RenderPass = deps.RenderPass || RenderPassImport;
+    const UnrealBloomPass = deps.UnrealBloomPass || UnrealBloomPassImport;
+    const ShaderPass = deps.ShaderPass || ShaderPassImport;
+    const OutputPass = deps.OutputPass || OutputPassImport;
+    const r = this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
     r.setPixelRatio(Math.min(window.devicePixelRatio, quality === 'high' ? 1.5 : quality === 'medium' ? 1.15 : 1));
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 0.75;

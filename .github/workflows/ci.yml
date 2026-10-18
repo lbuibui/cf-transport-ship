@@ -22,7 +22,7 @@ jobs:
       - name: lockfile 只能指向公开源
         run: npm run check:lockfile
       - run: npm ci
-      - run: npm test
+      - run: npm run test:coverage
       - run: npm run build
       - run: npm run check:license
       - run: npm run smoke

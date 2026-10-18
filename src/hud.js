@@ -25,7 +25,7 @@ const numIn = (v, def, min, max) => {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
 };
 
-function validResolution(v) {
+export function validResolution(v) {
   if (v === 'auto') return true;
   const m = /^(\d{3,5})x(\d{3,5})$/.exec(v);
   return !!m && +m[1] >= 800 && +m[1] <= 7680 && +m[2] >= 600 && +m[2] <= 4320;
@@ -33,7 +33,7 @@ function validResolution(v) {
 
 // localStorage 可能留着旧版本或手改的值。逐项校验，坏值回落默认，
 // 否则一个失效的主武器 id 就会让开局在 new WeaponState 处崩溃。
-function sanitizeKeys(raw) {
+export function sanitizeKeys(raw) {
   const keys = { ...DEFAULT_KEYS };
   if (!raw || typeof raw !== 'object') return keys;
   const used = new Set(Object.values(keys));
@@ -48,7 +48,7 @@ function sanitizeKeys(raw) {
   return keys;
 }
 
-function sanitizeOpts(base, raw) {
+export function sanitizeOpts(base, raw) {
   const o = { ...base, keys: { ...DEFAULT_KEYS } };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return o;
   if (OPT_TEAMS.includes(raw.team)) o.team = raw.team;

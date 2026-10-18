@@ -22,7 +22,8 @@ const MULTI_CN = ['', '', '双杀', '三杀', '四杀', '五杀', '六杀！', '
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _d = new THREE.Vector3();
 
 export class Game {
-  constructor() {
+  constructor(deps = {}) {
+    this.Renderer = deps.Renderer || Renderer;
     this.time = 0; this.frame = 0;
     this.playing = false; this.paused = false; this.locked = false;
     this.actors = []; this.nades = []; this.timers = []; this.tags = [];
@@ -51,7 +52,7 @@ export class Game {
     this.hud.show('loading');
     this.hud.loading(0.05, '初始化渲染器');
     await nextFrame();
-    this.renderer = new Renderer(document.getElementById('c'), this.opts.quality);
+    this.renderer = new this.Renderer(document.getElementById('c'), this.opts.quality);
     this.renderer.camera.fov = this.opts.fov;
     this.hud.loading(0.12, '生成集装箱 / 甲板 / 船体纹理');
     await nextFrame(); await nextFrame();

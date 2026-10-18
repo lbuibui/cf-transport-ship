@@ -18,7 +18,7 @@ const FACE = {
 };
 
 // 按材质合批的几何缓冲
-class Batch {
+export class Batch {
   constructor() { this.p = []; this.n = []; this.uv = []; this.idx = []; this.count = 0; }
   quad(v0, v1, v2, v3, nrm, uvs) {
     const b = this.count;
