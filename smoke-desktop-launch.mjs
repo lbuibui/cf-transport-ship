@@ -70,17 +70,8 @@ try {
   await page.waitForFunction(() => window.__game?.playing === true, null, { timeout: 60000 });
   const sim = await page.evaluate(() => window.__game.fastForward(3));
   check('对局模拟正常', typeof sim.time === 'string' && sim.kills.length > 0, sim.kills);
-  // 先直接渲染一帧，确认渲染路径本身可用。xvfb 下 rAF 可能完全不触发，
-  // 这条检查仍能覆盖 WebGL、后处理、HUD 与场景更新。
-  const render = await page.evaluate(() => {
-    const g = window.__game;
-    const before = g.frame;
-    g.renderFrame(0.016);
-    return { delta: g.frame - before, glError: g.renderer.renderer.getContext().getError() };
-  });
-  check('渲染路径可用', render.delta > 0 && render.glError === 0, `frame+${render.delta} glError=${render.glError}`);
-
   // 软件渲染（Linux xvfb / SwiftShader）可能只有几帧每秒；直接数渲染帧。
+  // 不额外手动调用 renderFrame：真实渲染循环已在跑，重复渲染会在 SwiftShader 下留下 GL 错误。
   const frames = await page.evaluate(async () => {
     const start = Date.now(), before = window.__game.frame;
     while (Date.now() - start < 2500) await new Promise((r) => setTimeout(r, 100));

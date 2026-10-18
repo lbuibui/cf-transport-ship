@@ -212,15 +212,15 @@ test('架点机器人会在目标层之间切换并生成路径', () => {
   const { g, b } = makeBot('normal');
   b.primary = 'awm';
   b.role = 'hold';
-  const layers = new Set();
-  for (let i = 0; i < 40; i++) {
-    b.stage = 0;
-    b.pickGoal();
-    layers.add(b.goalLayer);
-    assert.ok(Array.isArray(b.path));
-    assert.ok(Number.isFinite(b.goalHeight));
-  }
-  assert.ok(layers.size >= 2);
+  withRandom([0.1, 0], () => b.pickGoal());
+  assert.equal(b.goalLayer, 'roof');
+  assert.ok(Array.isArray(b.path));
+  assert.ok(Number.isFinite(b.goalHeight));
+  withRandom([0.9, 0], () => b.pickGoal());
+  assert.equal(b.goalLayer, 'high');
+  b.primary = 'ak47';
+  withRandom([0.9, 0], () => b.pickGoal());
+  assert.equal(b.goalLayer, 'ground');
   assert.equal(b.holdYaw !== undefined, true);
 });
 
