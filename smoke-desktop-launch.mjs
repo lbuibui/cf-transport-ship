@@ -22,7 +22,7 @@ const check = (name, ok, detail = '') => {
 };
 
 const extra = process.platform === 'linux'
-  ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--no-sandbox']
+  ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--no-sandbox', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding']
   : [];
 // 发布流水线用 SMOKE_EXE 指向 electron-builder 的 unpacked 产物，验证 asar 载荷。
 const exe = process.env.SMOKE_EXE;
@@ -56,6 +56,15 @@ try {
     return { version: st.version, electron: st.electron, displays: st.displays.length };
   });
   check('主进程 IPC 可用', state.displays > 0, `v${state.version} electron=${state.electron}`);
+
+  // 无窗口管理器时也要确认窗口真的可见，否则 rAF 会被 Chromium 暂停。
+  await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0];
+    if (w) { w.show(); w.focus(); }
+  });
+  const visible = await app.evaluate(({ BrowserWindow }) => !!BrowserWindow.getAllWindows()[0]?.isVisible());
+  const visibility = await page.evaluate(() => document.visibilityState);
+  check('窗口可见', visible && visibility === 'visible', `visible=${visible} state=${visibility}`);
 
   await page.click('#btnStart');
   await page.waitForFunction(() => window.__game?.playing === true, null, { timeout: 60000 });

@@ -119,14 +119,22 @@ function createWindow() {
     },
   });
 
-  win.once('ready-to-show', () => {
+  // ready-to-show 在部分 Linux/无窗口管理器环境里可能迟迟不触发。
+  // 加载完成 300ms 后兜底显示，避免窗口一直隐藏导致 requestAnimationFrame 停摆。
+  let shown = false;
+  const showWindow = () => {
+    if (shown || !win || win.isDestroyed()) return;
+    shown = true;
     if (s.maximized) win.maximize();
     if (s.fullscreen) win.setFullScreen(true);
     win.show();
+    win.focus();
     restored = true;
     log(`窗口就绪 ${win.getContentSize().join('x')} fullscreen=${win.isFullScreen()}`);
     if (isDev) win.webContents.openDevTools({ mode: 'detach' });
-  });
+  };
+  win.once('ready-to-show', showWindow);
+  win.webContents.once('did-finish-load', () => setTimeout(showWindow, 300));
 
   // 状态与全屏变化同步到渲染进程，并延迟写盘
   for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) win.on(ev, () => { if (restored) scheduleSaveState(win); });
