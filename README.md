@@ -48,7 +48,7 @@ npm run dist:win       # NSIS 安装包，x64
 npm run dist:linux     # AppImage + deb，x64 与 arm64
 ```
 
-产物写入 `release/`（已在 .gitignore 中），正式发布走 tag 驱动的 CI。
+打包脚本会先补齐 Electron / Chromium 的许可文本。产物写入 `release/`（已在 .gitignore 中），正式发布走 tag 驱动的 CI。
 
 ## 目录
 

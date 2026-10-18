@@ -83,6 +83,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: 补齐 Electron / Chromium 许可文本
+        run: npm run licenses:electron
+      - run: npm run check:license:pack
       - run: npx electron-builder ${{ matrix.args }} --publish never
       - name: 启动冒烟（打包产物）
         shell: bash

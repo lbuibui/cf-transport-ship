@@ -21,9 +21,12 @@ const css = fs.readFileSync('src/style.css', 'utf8');
 const html = tpl.replace('/*__CSS__*/', () => css).replace('/*__JS__*/', () => js.replace(/<\/script>/g, '<\\/script>'));
 fs.mkdirSync('dist', { recursive: true });
 fs.writeFileSync('dist/index.html', html);
-// Electron 的预编译包里带有 Chromium 的完整许可文本，但 electron-builder 不会自动复制。
-for (const [src, dst] of [['node_modules/electron/dist/LICENSE', 'LICENSE.electron.txt'], ['node_modules/electron/dist/LICENSES.chromium.html', 'LICENSES.chromium.html']]) {
-  if (!fs.existsSync(src)) throw new Error(`缺少 ${src}，无法随包分发完整许可文本`);
-  fs.copyFileSync(src, `dist/${dst}`);
-}
+// Electron 的 MIT 文本随 npm 包提供；Chromium 的完整通知只在 Electron 二进制下载后出现。
+// 浏览器构建不强制下载 Electron，打包前用 npm run licenses:electron 补齐。
+const electronLicense = 'node_modules/electron/LICENSE';
+if (!fs.existsSync(electronLicense)) throw new Error(`缺少 ${electronLicense}，无法随包分发 Electron 许可`);
+fs.copyFileSync(electronLicense, 'dist/LICENSE.electron.txt');
+const chromiumLicense = 'node_modules/electron/dist/LICENSES.chromium.html';
+if (fs.existsSync(chromiumLicense)) fs.copyFileSync(chromiumLicense, 'dist/LICENSES.chromium.html');
+else fs.rmSync('dist/LICENSES.chromium.html', { force: true });
 console.log('built dist/index.html', (html.length / 1024).toFixed(1) + ' KB');
